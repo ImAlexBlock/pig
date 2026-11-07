@@ -227,9 +227,18 @@ func (s *Server) sessionForChat(channelName, chatID string) (*store.Session, err
 	return sess, nil
 }
 
+// renderFor adapts an outbound body to the channel. Channels without markdown
+// get rendered plain text, not raw markdown source.
+func renderFor(ad channel.Adapter, text string) (body string, markdown bool) {
+	if ad.Caps().Markdown {
+		return text, true
+	}
+	return channel.PlainText(text), false
+}
+
 func (s *Server) sendText(ctx context.Context, ad channel.Adapter, chatID, text, replyTo string) {
-	markdown := ad.Caps().Markdown && strings.Contains(text, "**")
-	_, err := ad.Send(ctx, channel.Outbound{ChatID: chatID, Text: text, ReplyTo: replyTo, Markdown: markdown})
+	body, markdown := renderFor(ad, text)
+	_, err := ad.Send(ctx, channel.Outbound{ChatID: chatID, Text: body, ReplyTo: replyTo, Markdown: markdown})
 	if err != nil {
 		s.logf("channel %s send: %v", ad.Name(), err)
 	}
@@ -435,12 +444,26 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 				if final == "" {
 					final = "(no output)"
 				}
-				for i, chunk := range channel.Split(final, ad.Caps().MaxChars) {
+				body, markdown := renderFor(ad, final)
+				chunks := channel.Split(body, ad.Caps().MaxChars)
+				for i, chunk := range chunks {
 					replyTo := ""
 					if i == 0 {
 						replyTo = ib.MessageID
 					}
-					if _, serr := ad.Send(ctx, channel.Outbound{ChatID: ib.ChatID, Text: chunk, ReplyTo: replyTo, Markdown: ad.Caps().Markdown}); serr != nil {
+					out := channel.Outbound{ChatID: ib.ChatID, Text: chunk, ReplyTo: replyTo, Markdown: markdown}
+					// Replace the status bubble instead of leaving "working…" above the answer.
+					if i == 0 {
+						p.mu.Lock()
+						handle := p.handle
+						p.mu.Unlock()
+						if handle.ID != "" && ad.Caps().Edit {
+							if uerr := ad.Update(ctx, handle, out); uerr == nil {
+								continue
+							}
+						}
+					}
+					if _, serr := ad.Send(ctx, out); serr != nil {
 						s.logf("channel %s send: %v", ad.Name(), serr)
 					}
 				}

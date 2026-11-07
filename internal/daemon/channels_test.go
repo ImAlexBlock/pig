@@ -14,15 +14,16 @@ import (
 )
 
 type fakeAdapter struct {
-	name string
-	mu   sync.Mutex
-	sent []string
+	name     string
+	markdown bool
+	mu       sync.Mutex
+	sent     []string
 }
 
 func (f *fakeAdapter) Name() string { return f.name }
 
 func (f *fakeAdapter) Caps() channel.Caps {
-	return channel.Caps{Edit: false, Stream: false, Markdown: false, MaxChars: 4096}
+	return channel.Caps{Edit: f.markdown, Stream: false, Markdown: f.markdown, MaxChars: 4096}
 }
 
 func (f *fakeAdapter) Run(ctx context.Context, in chan<- channel.Inbound) error {
@@ -172,5 +173,23 @@ func TestChannelPairingBlocksAfterFiveAttempts(t *testing.T) {
 	ad.waitFor(t, "too many attempts", 5*time.Second)
 	if _, err := srv.Store().GetChannelState("fake", "chat-2"); err == nil {
 		t.Fatal("chat was paired while rate limited")
+	}
+}
+
+func TestRenderForPlainChannel(t *testing.T) {
+	md := &fakeAdapter{name: "md", markdown: true}
+	if body, mark := renderFor(md, "**bold** and `code`"); !mark || body != "**bold** and `code`" {
+		t.Fatalf("markdown channel: body=%q markdown=%v", body, mark)
+	}
+	plain := &fakeAdapter{name: "plain", markdown: false}
+	body, mark := renderFor(plain, "**bold** and `code`")
+	if mark {
+		t.Fatal("plain channel reported markdown")
+	}
+	if strings.Contains(body, "**") || strings.Contains(body, "`") {
+		t.Fatalf("markdown source leaked to a plain channel: %q", body)
+	}
+	if !strings.Contains(body, "bold") || !strings.Contains(body, "code") {
+		t.Fatalf("plain text lost content: %q", body)
 	}
 }
