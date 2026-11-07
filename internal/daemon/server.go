@@ -65,6 +65,9 @@ type Server struct {
 	pairings       map[string]*channel.Pairing
 	progress       map[string]*chatProgress
 
+	chatMu   sync.Mutex
+	chatTail map[string]chan struct{}
+
 	lastRequest  map[string]time.Time
 	lastActivity time.Time
 
@@ -95,6 +98,7 @@ func New(opt Options) (*Server, error) {
 		queue:          map[string][]queuedInput{},
 		connSubs:       map[int][]*subscriber{},
 		pairings:       map[string]*channel.Pairing{},
+		chatTail:       map[string]chan struct{}{},
 		progress:       map[string]*chatProgress{},
 		lastRequest:    map[string]time.Time{},
 		lastActivity:   time.Now(),

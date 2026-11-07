@@ -323,6 +323,16 @@ func (s *Server) Detach(runID string) error {
 }
 
 // ActiveRun returns the run id and session for a session.
+// ClearQueue drops inputs waiting behind the active run for a session and
+// reports how many were dropped.
+func (s *Server) ClearQueue(sessionID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := len(s.queue[sessionID])
+	delete(s.queue, sessionID)
+	return n
+}
+
 func (s *Server) ActiveRun(sessionID string) (runID, sessID string, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

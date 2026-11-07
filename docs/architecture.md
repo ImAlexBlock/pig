@@ -392,8 +392,28 @@ Commands: `/new`, `/resume <id>`, `/stop`, `/status`, `/compact`, `/model [ref]`
 `/jobs`, `/help`.
 
 Rendering: markdown-capable channels get the raw text; others get rendered plain
-text. Progress is one edited bubble where the channel supports editing, and the
-final answer replaces that bubble when possible.
+text.
+
+Each inbound message is dispatched without blocking the adapter reader, so a
+command such as `/stop` reaches the daemon while a run is active. Messages keep
+arrival order per chat; commands run immediately. `/stop` cancels the active run,
+drops inputs queued behind it, and the run ends with `⏳ stopped after <elapsed>`.
+
+Progress is one status line, rendered from the run events:
+
+```
+⏳ 1m32s · Build · bash · 7 tools · ctx 48.3k · compacted with shake
+```
+
+| Channel | Behaviour |
+|---|---|
+| editing channels (Telegram) | the line is sent once and edited every 3 s; the first answer chunk replaces it |
+| QQ direct chat | cannot edit, so the first line waits until 6 s or the first finished tool, then at most one milestone at 90 s, and only while at least three passive replies remain |
+| QQ group chat | silent: every status would cost a passive reply |
+
+The answer is budgeted against the same passive window: past the remaining
+replies the tail is replaced by `[… reply limit reached; full text:
+session://<id>]` instead of failing to send.
 
 ### QQ specifics
 
@@ -403,9 +423,10 @@ final answer replaces that bubble when possible.
 - Every reply chunk carries `msg_id`, `msg_seq` and, in text mode,
   `message_reference`. A chunk without `msg_id` becomes an active message and
   renders as an unsupported type.
-- QQ allows five passive replies per inbound message. The status bubble takes
-  one, so a long answer is split at 2000 characters; past the window the send
-  fails with `passive reply limit reached` instead of silently degrading.
+- QQ allows five passive replies per inbound message. The daemon reads the
+  remaining count (`RemainingSlots`), so progress and the answer share one
+  budget: answers split at 2000 characters, and the tail past the window is
+  replaced by a `session://` pointer instead of a failed send.
 - Media: `POST /v2/{users,groups}/{id}/files` with `file_type` 1 for images and 4
   for files, `file_data` base64 and `srv_send_msg:false`; the response carries
   `file_info`, which the follow-up `msg_type: 7` message references.
@@ -524,8 +545,8 @@ what the five-passive-reply and chunking logic in the channel has to absorb.
 
 | Area | Limitation | Mitigation in place |
 |---|---|---|
-| channels | one message handled at a time per adapter; a long run blocks the next message on that channel | one session and FIFO queue per chat; adapter buffer 32 |
-| QQ | five passive replies per inbound message | 2000-character chunks, explicit error past the window |
+| channels | one adapter reader goroutine per channel | messages are dispatched per chat with arrival order kept; commands run immediately |
+| QQ | five passive replies per inbound message | one status, one milestone at most, 2000-character chunks, tail replaced by a session pointer |
 | vision | the reference provider route returns 504 for image input, so the deployed model declares `input = ["text"]` | attachments degrade to artifact references |
 | convergence | only byte-identical tool batches are caught | soft round notice at 30, hard cap at 500 |
 | storage | no artifact garbage collection | artifacts are small; prune manually if needed |

@@ -45,3 +45,10 @@ type Adapter interface {
 	Update(ctx context.Context, h Handle, o Outbound) error
 	Close() error
 }
+
+// SlotReporter is implemented by adapters whose platform caps how many replies
+// one inbound message may receive. It lets the daemon budget its messages
+// instead of discovering the limit when a send fails.
+type SlotReporter interface {
+	RemainingSlots(chatID, replyTo string) int
+}

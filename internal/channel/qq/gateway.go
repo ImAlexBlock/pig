@@ -89,16 +89,33 @@ func (a *Adapter) randomSeq() int {
 	return int((time.Now().Unix()%100000000 ^ int64(rand.Uint32()&0xFFFF)) % 65536)
 }
 
-// nextSeq returns the next reply sequence for a passive message. QQ allows at
-// most five passive replies per source message.
+// PassiveReplyLimit is how many replies one inbound QQ message may receive.
+const PassiveReplyLimit = 5
+
+// nextSeq returns the next reply sequence for a passive message.
 func (a *Adapter) nextSeq(msgID string) (int, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.seqs[msgID]++
-	if a.seqs[msgID] > 5 {
+	if a.seqs[msgID] > PassiveReplyLimit {
 		return 0, false
 	}
 	return a.seqs[msgID], true
+}
+
+// RemainingSlots reports how many passive replies the source message can still
+// receive, so the daemon can budget progress updates against the answer.
+func (a *Adapter) RemainingSlots(chatID, replyTo string) int {
+	if replyTo == "" {
+		return PassiveReplyLimit
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	left := PassiveReplyLimit - a.seqs[replyTo]
+	if left < 0 {
+		return 0
+	}
+	return left
 }
 
 type gatewayPayload struct {

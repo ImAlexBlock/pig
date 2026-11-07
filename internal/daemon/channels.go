@@ -15,7 +15,18 @@ import (
 	"github.com/alexblock/pig/internal/store"
 )
 
-// chatProgress renders one chat's run progress into a single message.
+const (
+	// firstStatusDelay keeps QQ from spending a passive reply on a status line
+	// before there is anything to report.
+	firstStatusDelay = 6 * time.Second
+	// milestoneAfter sends one more status line for long runs, if slots allow.
+	milestoneAfter = 90 * time.Second
+	// milestoneMinSlots is the free-slot floor below which no extra status is
+	// sent: the answer needs those replies.
+	milestoneMinSlots = 3
+)
+
+// chatProgress renders one chat's run progress into a single status line.
 type chatProgress struct {
 	adapter channel.Adapter
 	chatID  string
@@ -27,16 +38,65 @@ type chatProgress struct {
 	handle     channel.Handle
 	lastUpdate time.Time
 	notices    []string
+	startedAt  time.Time
+	steps      int
+	lastTool   string
+	phase      string
+	ctxTokens  int
+	sentFirst  bool
+	milestone  bool
 }
 
 func newChatProgress(ad channel.Adapter, chatID, replyTo string) *chatProgress {
-	return &chatProgress{adapter: ad, chatID: chatID, replyTo: replyTo, ch: make(chan agent.Event, 256)}
+	return &chatProgress{
+		adapter:   ad,
+		chatID:    chatID,
+		replyTo:   replyTo,
+		ch:        make(chan agent.Event, 256),
+		startedAt: time.Now(),
+	}
 }
 
 func (p *chatProgress) push(ev agent.Event) {
 	select {
 	case p.ch <- ev:
 	default:
+	}
+}
+
+// observe folds one run event into the progress counters.
+func (p *chatProgress) observe(ev agent.Event) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch ev.Type {
+	case agent.EvToolStart:
+		if ev.ToolName != "" {
+			p.lastTool = ev.ToolName
+		}
+	case agent.EvToolEnd:
+		p.steps++
+		if ev.ToolName != "" {
+			p.lastTool = ev.ToolName
+		}
+	case agent.EvTodo:
+		for _, ph := range ev.Phases {
+			for _, it := range ph.Items {
+				if it.Status == "active" {
+					p.phase = ph.Name
+				}
+			}
+		}
+	case agent.EvUsage:
+		if ev.Usage != nil && ev.Usage.Input > 0 {
+			p.ctxTokens = ev.Usage.Input
+		}
+	case agent.EvNotice:
+		if ev.Notice != "" {
+			p.notices = append(p.notices, ev.Notice)
+			if len(p.notices) > 20 {
+				p.notices = p.notices[1:]
+			}
+		}
 	}
 }
 
@@ -47,37 +107,153 @@ func (p *chatProgress) interval() time.Duration {
 	return 3 * time.Second
 }
 
-func (p *chatProgress) flush(ctx context.Context) {
-	p.mu.Lock()
+// statusLocked renders the status line: elapsed, phase, tool, step count and
+// context size, plus the latest notice.
+func (p *chatProgress) statusLocked(elapsed time.Duration) string {
+	parts := []string{"⏳ " + shortDuration(elapsed)}
+	if p.phase != "" {
+		parts = append(parts, p.phase)
+	}
+	if p.lastTool != "" {
+		parts = append(parts, p.lastTool)
+	}
+	if p.steps > 0 {
+		parts = append(parts, fmt.Sprintf("%d tools", p.steps))
+	}
+	if p.ctxTokens > 0 {
+		parts = append(parts, "ctx "+shortTokens(p.ctxTokens))
+	}
+	if n := len(p.notices); n > 0 {
+		if last := strings.TrimSpace(p.notices[n-1]); last != "" {
+			parts = append(parts, trimRunes(last, 40))
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// flush sends or updates the status line when the channel allows it.
+func (p *chatProgress) flush(ctx context.Context) error {
 	// QQ group chats only accept passive replies, so progress stays silent
-	// there; direct chats stream with replace semantics.
+	// there; direct chats stream with replace semantics when they support it.
 	if p.adapter.Name() == "qq" && strings.HasPrefix(p.chatID, "g:") {
-		p.mu.Unlock()
-		return
+		return nil
 	}
-	if p.adapter.Caps().Edit == false || time.Since(p.lastUpdate) < p.interval() {
-		p.mu.Unlock()
-		return
-	}
-	status := "⏳ working…"
-	if len(p.notices) > 0 {
-		status = "⏳ " + p.notices[len(p.notices)-1]
-	}
+	editable := p.adapter.Caps().Edit
+
+	p.mu.Lock()
+	elapsed := time.Since(p.startedAt)
+	sent, milestone := p.sentFirst, p.milestone
 	handle := p.handle
-	p.lastUpdate = time.Now()
+	recent := time.Since(p.lastUpdate)
+	steps := p.steps
+	text := p.statusLocked(elapsed)
 	p.mu.Unlock()
 
-	o := channel.Outbound{ChatID: p.chatID, Text: status, ReplyTo: p.replyTo, Markdown: false}
-	if handle.ID == "" {
-		h, err := p.adapter.Send(ctx, o)
-		if err == nil {
-			p.mu.Lock()
-			p.handle = h
-			p.mu.Unlock()
-		}
-		return
+	if sent && recent < p.interval() {
+		return nil
 	}
-	_ = p.adapter.Update(ctx, handle, o)
+	if !editable {
+		// Without message editing every update costs a passive reply: wait for
+		// real work, then send one milestone at most.
+		if !sent && elapsed < firstStatusDelay && steps == 0 {
+			return nil
+		}
+		if sent {
+			if milestone || elapsed < milestoneAfter {
+				return nil
+			}
+			if sr, ok := p.adapter.(channel.SlotReporter); ok && sr.RemainingSlots(p.chatID, p.replyTo) < milestoneMinSlots {
+				return nil
+			}
+		}
+	}
+
+	o := channel.Outbound{ChatID: p.chatID, Text: text, ReplyTo: p.replyTo}
+	if handle.ID == "" || !editable {
+		h, err := p.adapter.Send(ctx, o)
+		p.mu.Lock()
+		p.lastUpdate = time.Now()
+		if err == nil {
+			if p.handle.ID == "" {
+				p.handle = h
+			}
+			p.sentFirst = true
+			if sent {
+				p.milestone = true
+			}
+		}
+		p.mu.Unlock()
+		return err
+	}
+	err := p.adapter.Update(ctx, handle, o)
+	p.mu.Lock()
+	p.lastUpdate = time.Now()
+	p.mu.Unlock()
+	return err
+}
+
+func shortDuration(d time.Duration) string {
+	s := int(d.Seconds())
+	if s < 0 {
+		s = 0
+	}
+	switch {
+	case s < 60:
+		return fmt.Sprintf("%ds", s)
+	case s < 3600:
+		return fmt.Sprintf("%dm%02ds", s/60, s%60)
+	default:
+		return fmt.Sprintf("%dh%02dm", s/3600, (s%3600)/60)
+	}
+}
+
+func shortTokens(n int) string {
+	switch {
+	case n < 1000:
+		return fmt.Sprintf("%d", n)
+	case n < 100000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	case n < 1000000:
+		return fmt.Sprintf("%.0fk", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%.1fM", float64(n)/1000000)
+	}
+}
+
+func trimRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+// budgetChunks limits an answer to the replies the chat can still receive and
+// marks where the rest went, instead of losing it to a failed send.
+func budgetChunks(ad channel.Adapter, chatID, replyTo, sessionID string, chunks []string) []string {
+	slots, ok := passiveSlots(ad, chatID, replyTo)
+	if !ok {
+		return chunks
+	}
+	if slots <= 0 {
+		return nil
+	}
+	if len(chunks) <= slots {
+		return chunks
+	}
+	out := chunks[:slots]
+	out[slots-1] = strings.TrimRight(out[slots-1], "\n") +
+		fmt.Sprintf("\n[… reply limit reached; full text: session://%s]", sessionID)
+	return out
+}
+
+// passiveSlots reports how many replies the chat can still send for a message.
+func passiveSlots(ad channel.Adapter, chatID, replyTo string) (int, bool) {
+	sr, ok := ad.(channel.SlotReporter)
+	if !ok || replyTo == "" {
+		return 0, false
+	}
+	return sr.RemainingSlots(chatID, replyTo), true
 }
 
 // startChannels builds the enabled adapters.
@@ -151,9 +327,46 @@ func (s *Server) consumeChannel(ctx context.Context, ad channel.Adapter, in <-ch
 			if !ok {
 				return
 			}
-			s.handleChannelMessage(ctx, ad, ib)
+			// A run takes minutes; the reader must not block on it or a /stop
+			// sent mid-run would only be seen after the run finished.
+			if strings.HasPrefix(strings.TrimSpace(ib.Text), "/") {
+				go s.handleChannelMessage(ctx, ad, ib)
+				continue
+			}
+			s.dispatchMessage(ctx, ad, ib)
 		}
 	}
+}
+
+// dispatchMessage handles one message without blocking the adapter reader while
+// keeping arrival order per chat.
+func (s *Server) dispatchMessage(ctx context.Context, ad channel.Adapter, ib channel.Inbound) {
+	key := ad.Name() + "|" + ib.ChatID
+	done := make(chan struct{})
+
+	s.chatMu.Lock()
+	prev := s.chatTail[key]
+	s.chatTail[key] = done
+	s.chatMu.Unlock()
+
+	go func() {
+		defer close(done)
+		defer func() {
+			s.chatMu.Lock()
+			if s.chatTail[key] == done {
+				delete(s.chatTail, key)
+			}
+			s.chatMu.Unlock()
+		}()
+		if prev != nil {
+			select {
+			case <-prev:
+			case <-ctx.Done():
+				return
+			}
+		}
+		s.handleChannelMessage(ctx, ad, ib)
+	}()
 }
 
 func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, ib channel.Inbound) {
@@ -273,9 +486,18 @@ func (s *Server) channelCommand(ctx context.Context, ad channel.Adapter, ib chan
 		_ = s.st.SetChannelState(state)
 		s.sendText(ctx, ad, ib.ChatID, "resumed "+rest, ib.MessageID)
 	case "/stop":
+		dropped := s.ClearQueue(state.SessionID)
 		if runID, _, ok := s.ActiveRun(state.SessionID); ok {
 			_ = s.CancelRun(runID)
-			s.sendText(ctx, ad, ib.ChatID, "stopped", ib.MessageID)
+			if dropped > 0 {
+				s.sendText(ctx, ad, ib.ChatID, fmt.Sprintf("stopping (dropped %d queued)", dropped), ib.MessageID)
+				return
+			}
+			s.sendText(ctx, ad, ib.ChatID, "stopping", ib.MessageID)
+			return
+		}
+		if dropped > 0 {
+			s.sendText(ctx, ad, ib.ChatID, fmt.Sprintf("queue cleared (%d dropped)", dropped), ib.MessageID)
 			return
 		}
 		s.sendText(ctx, ad, ib.ChatID, "nothing running", ib.MessageID)
@@ -451,11 +673,14 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 		case <-deadline.C:
 			return
 		case <-ticker.C:
-			p.flush(ctx)
+			if err := p.flush(ctx); err != nil {
+				s.logf("channel %s progress: %v", ad.Name(), err)
+			}
 		case ev := <-p.ch:
 			if ev.RunID != "" && ev.RunID != runID {
 				continue
 			}
+			p.observe(ev)
 			switch ev.Type {
 			case agent.EvTextDelta:
 				p.mu.Lock()
@@ -465,19 +690,13 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 				if ev.Artifact != "" && len(produced) < channel.MaxOutboundFiles {
 					produced = append(produced, ev)
 				}
-			case agent.EvNotice:
-				p.mu.Lock()
-				if ev.Notice != "" {
-					p.notices = append(p.notices, ev.Notice)
-					if len(p.notices) > 20 {
-						p.notices = p.notices[1:]
-					}
-				}
-				p.mu.Unlock()
 			case agent.EvError:
 				pending = "✗ " + ev.Error
 			case agent.EvRunEnd:
 				final := pending
+				if final == "" && ev.Stop == "canceled" {
+					final = "⏳ stopped after " + shortDuration(time.Duration(ev.ElapsedMS)*time.Millisecond)
+				}
 				if final == "" {
 					p.mu.Lock()
 					final = strings.TrimSpace(p.text.String())
@@ -488,6 +707,11 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 				}
 				body, markdown := renderFor(ad, final)
 				chunks := channel.Split(body, ad.Caps().MaxChars)
+				chunks = budgetChunks(ad, ib.ChatID, ib.MessageID, sess.ID, chunks)
+				if len(chunks) == 0 {
+					s.logf("channel %s reply limit reached for %s; answer kept in session %s", ad.Name(), ib.MessageID, sess.ID)
+					return
+				}
 				for i, chunk := range chunks {
 					// Every chunk stays inside the passive reply window: a chunk
 					// without msg_id becomes an active message, which QQ renders

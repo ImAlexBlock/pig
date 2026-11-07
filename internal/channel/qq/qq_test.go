@@ -254,3 +254,29 @@ func TestInboundAttachmentDownload(t *testing.T) {
 		t.Fatal("no inbound event")
 	}
 }
+
+func TestRemainingSlots(t *testing.T) {
+	a := New(config.QQChannel{AppID: "1", APIBase: "https://api.bot.qq.com"}, "s")
+	if got := a.RemainingSlots(PrefixUser+"u", "m1"); got != PassiveReplyLimit {
+		t.Fatalf("fresh message slots = %d, want %d", got, PassiveReplyLimit)
+	}
+	for i := 1; i <= 3; i++ {
+		if seq, ok := a.nextSeq("m1"); !ok || seq != i {
+			t.Fatalf("nextSeq = %d, %v at step %d", seq, ok, i)
+		}
+	}
+	if got := a.RemainingSlots(PrefixUser+"u", "m1"); got != 2 {
+		t.Fatalf("after 3 replies slots = %d, want 2", got)
+	}
+	for i := 0; i < 2; i++ {
+		if _, ok := a.nextSeq("m1"); !ok {
+			t.Fatalf("reply %d rejected", i+4)
+		}
+	}
+	if got := a.RemainingSlots(PrefixUser+"u", "m1"); got != 0 {
+		t.Fatalf("exhausted slots = %d, want 0", got)
+	}
+	if _, ok := a.nextSeq("m1"); ok {
+		t.Fatal("sixth passive reply accepted")
+	}
+}
