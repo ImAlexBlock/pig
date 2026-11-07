@@ -106,13 +106,14 @@ func (s *Server) handleIPC(ctx context.Context, c *ipc.Conn, method string, para
 
 	case "run.start":
 		var p struct {
-			SessionID  string `json:"session_id"`
-			Prompt     string `json:"prompt"`
-			CWD        string `json:"cwd"`
-			Model      string `json:"model"`
-			Client     string `json:"client"`
-			Queue      *bool  `json:"queue"`
-			Background bool   `json:"background"`
+			SessionID   string   `json:"session_id"`
+			Prompt      string   `json:"prompt"`
+			CWD         string   `json:"cwd"`
+			Model       string   `json:"model"`
+			Client      string   `json:"client"`
+			Queue       *bool    `json:"queue"`
+			Background  bool     `json:"background"`
+			Attachments []string `json:"attachments"`
 		}
 		if err := decodeParams(params, &p); err != nil {
 			return nil, err
@@ -123,7 +124,7 @@ func (s *Server) handleIPC(ctx context.Context, c *ipc.Conn, method string, para
 		}
 		spec := runSpec{
 			SessionID: p.SessionID, Prompt: p.Prompt, CWD: p.CWD, Model: p.Model,
-			Client: p.Client, Queue: queue,
+			Client: p.Client, Queue: queue, Attachments: p.Attachments,
 		}
 		if p.Background {
 			jobID, err := s.StartBackground(spec)

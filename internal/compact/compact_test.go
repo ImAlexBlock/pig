@@ -264,3 +264,43 @@ func TestCompactShake(t *testing.T) {
 		t.Fatalf("content did not shrink: %d → %d", bigBefore, bigAfter)
 	}
 }
+
+func TestProjectAttachments(t *testing.T) {
+	mk := func(text string, ids []string) *store.Entry {
+		return &store.Entry{
+			Kind:    store.KindMessage,
+			Role:    "user",
+			Content: store.NewMessageContent(store.MessageContent{Text: text, Attachments: ids}),
+			Seq:     1,
+		}
+	}
+	// Vision model: the attachment becomes an image block.
+	msgs := Project(nil, []*store.Entry{mk("look", []string{"art_1"})}, ProjectOptions{
+		ImageInput: true,
+		LoadFrame: func(id string) (string, []byte, bool) {
+			return "image/png", []byte("PNG"), true
+		},
+	})
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %d", len(msgs))
+	}
+	var images int
+	for _, b := range msgs[0].Blocks {
+		if b.Type == provider.BlockImage {
+			images++
+		}
+	}
+	if images != 1 {
+		t.Fatalf("image blocks = %d, want 1 (%+v)", images, msgs[0].Blocks)
+	}
+
+	// Text-only model: the attachment degrades to an artifact reference.
+	msgs = Project(nil, []*store.Entry{mk("look", []string{"art_1"})}, ProjectOptions{ImageInput: false})
+	joined := ""
+	for _, b := range msgs[0].Blocks {
+		joined += b.Text
+	}
+	if !strings.Contains(joined, "artifact://art_1") {
+		t.Fatalf("placeholder missing: %q", joined)
+	}
+}

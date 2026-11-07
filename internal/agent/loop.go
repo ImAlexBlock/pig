@@ -62,6 +62,8 @@ type Options struct {
 	SubContext    string
 	OriginChannel string
 	OriginChat    string
+	// Attachments are artifact ids already stored for this prompt.
+	Attachments []string
 }
 
 type runState struct {
@@ -115,7 +117,12 @@ func (a *Agent) memoryFacts() []string {
 }
 
 func (a *Agent) appendUser(sessionID, text string) error {
-	content := store.NewMessageContent(store.MessageContent{Text: text})
+	return a.appendUserWithAttachments(sessionID, text, nil)
+}
+
+// appendUserWithAttachments writes a user turn plus attachment artifact ids.
+func (a *Agent) appendUserWithAttachments(sessionID, text string, attachments []string) error {
+	content := store.NewMessageContent(store.MessageContent{Text: text, Attachments: attachments})
 	_, err := a.Store.AppendEntry(sessionID, store.KindMessage, "user", content, compact.EstimateTokens(text))
 	return err
 }
@@ -256,7 +263,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, opt Options) error {
 	}
 
 	if opt.Prompt != "" {
-		if err := a.appendUser(sessionID, opt.Prompt); err != nil {
+		if err := a.appendUserWithAttachments(sessionID, opt.Prompt, opt.Attachments); err != nil {
 			return err
 		}
 	}

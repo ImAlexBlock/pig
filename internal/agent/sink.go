@@ -18,6 +18,7 @@ const (
 	EvCompactStart  = "compact_start"
 	EvCompactEnd    = "compact_end"
 	EvJobUpdate     = "job_update"
+	EvArtifact      = "artifact"
 	EvRunDetached   = "run_detached"
 	EvRunEnd        = "run_end"
 	EvError         = "error"
@@ -43,6 +44,9 @@ type Event struct {
 	Job       *store.Job        `json:"job,omitempty"`
 	Model     string            `json:"model,omitempty"`
 	Method    string            `json:"method,omitempty"`
+	Artifact  string            `json:"artifact,omitempty"`
+	Mime      string            `json:"mime,omitempty"`
+	Name      string            `json:"name,omitempty"`
 	Stop      string            `json:"stop,omitempty"`
 	Tokens    int               `json:"tokens,omitempty"`
 	ElapsedMS int64             `json:"elapsed_ms,omitempty"`

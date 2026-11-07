@@ -179,15 +179,24 @@ func TestAutoFork(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	entries, _ = srv.Store().AllEntries(sessionID)
-	answered := false
-	for _, e := range entries {
-		if e.Kind == store.KindMessage && e.Role == "user" && e.Message().Text == "second" {
-			answered = true
+	// The queued prompt starts its own run; poll for the user entry instead of
+	// checking once, so scheduling jitter cannot fail the test.
+	deadline = time.Now().Add(20 * time.Second)
+	for {
+		entries, _ = srv.Store().AllEntries(sessionID)
+		answered := false
+		for _, e := range entries {
+			if e.Kind == store.KindMessage && e.Role == "user" && e.Message().Text == "second" {
+				answered = true
+			}
 		}
-	}
-	if !answered {
-		t.Fatal("queued prompt was dropped")
+		if answered {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("queued prompt was dropped")
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

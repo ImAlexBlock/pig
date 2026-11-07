@@ -29,6 +29,7 @@ type runRecord struct {
 type runSpec struct {
 	SessionID     string
 	Prompt        string
+	Attachments   []string
 	Model         string
 	CWD           string
 	Client        string
@@ -143,6 +144,7 @@ func (s *Server) runLoop(rec *runRecord, spec runSpec) {
 	opt := agent.Options{
 		RunID:         rec.ID,
 		Prompt:        spec.Prompt,
+		Attachments:   spec.Attachments,
 		Model:         spec.Model,
 		OriginChannel: rec.originChannel,
 		OriginChat:    rec.originChat,

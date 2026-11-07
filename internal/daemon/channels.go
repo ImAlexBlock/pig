@@ -363,7 +363,43 @@ func helpText() string {
 }
 
 // channelRun starts a run and mirrors it into the chat.
+// saveInboundAttachments stores chat attachments as artifacts and returns the
+// ids plus a prompt note the model can act on.
+func (s *Server) saveInboundAttachments(sessionID string, attachments []channel.Attachment) ([]string, string) {
+	var ids []string
+	var lines []string
+	for _, a := range attachments {
+		if len(a.Data) == 0 {
+			continue
+		}
+		mime := a.Mime
+		if mime == "" {
+			mime = "application/octet-stream"
+		}
+		art, err := s.st.PutArtifact(sessionID, mime, a.Data)
+		if err != nil {
+			s.logf("attachment store: %v", err)
+			continue
+		}
+		ids = append(ids, art.ID)
+		name := a.Name
+		if name == "" {
+			name = art.ID
+		}
+		lines = append(lines, fmt.Sprintf("[attachment %s %s (%d bytes) artifact://%s]", a.Kind, name, len(a.Data), art.ID))
+	}
+	if len(ids) > 0 {
+		lines = append(lines, "Read an attachment with `read artifact://<id>`; images are shown to you when the model supports them.")
+	}
+	return ids, strings.Join(lines, "\n")
+}
+
 func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.Inbound, sess *store.Session) {
+	attachIDs, attachNote := s.saveInboundAttachments(sess.ID, ib.Attachments)
+	prompt := ib.Text
+	if attachNote != "" {
+		prompt = strings.TrimSpace(prompt + "\n\n" + attachNote)
+	}
 	p := newChatProgress(ad, ib.ChatID, ib.MessageID)
 	// Subscribe to the session first: a fast run may finish before we know its
 	// id, and losing run_end would strand the chat.
@@ -375,7 +411,8 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 
 	runID, sessionID, queued, err := s.StartRun(runSpec{
 		SessionID:     sess.ID,
-		Prompt:        ib.Text,
+		Prompt:        prompt,
+		Attachments:   attachIDs,
 		Queue:         true,
 		Client:        ad.Name(),
 		OriginChannel: ad.Name(),
@@ -406,6 +443,7 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 	deadline := time.NewTimer(2 * time.Hour)
 	defer deadline.Stop()
 	pending := ""
+	var produced []agent.Event
 	for {
 		select {
 		case <-ctx.Done():
@@ -423,6 +461,10 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 				p.mu.Lock()
 				p.text.WriteString(ev.Text)
 				p.mu.Unlock()
+			case agent.EvArtifact:
+				if ev.Artifact != "" && len(produced) < channel.MaxOutboundFiles {
+					produced = append(produced, ev)
+				}
 			case agent.EvNotice:
 				p.mu.Lock()
 				if ev.Notice != "" {
@@ -447,10 +489,10 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 				body, markdown := renderFor(ad, final)
 				chunks := channel.Split(body, ad.Caps().MaxChars)
 				for i, chunk := range chunks {
-					replyTo := ""
-					if i == 0 {
-						replyTo = ib.MessageID
-					}
+					// Every chunk stays inside the passive reply window: a chunk
+					// without msg_id becomes an active message, which QQ renders
+					// as "unsupported message type" for unapproved bots.
+					replyTo := ib.MessageID
 					out := channel.Outbound{ChatID: ib.ChatID, Text: chunk, ReplyTo: replyTo, Markdown: markdown}
 					// Replace the status bubble instead of leaving "working…" above the answer.
 					if i == 0 {
@@ -467,6 +509,7 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 						s.logf("channel %s send: %v", ad.Name(), serr)
 					}
 				}
+				s.sendProducedMedia(ctx, ad, ib, produced)
 				return
 			}
 		}
@@ -507,4 +550,34 @@ func firstLineOf(s string, max int) string {
 		s = s[:max] + "…"
 	}
 	return strings.TrimSpace(s)
+}
+
+// sendProducedMedia delivers images a run produced (screenshots, rendered
+// files) back to the chat when the adapter supports media.
+func (s *Server) sendProducedMedia(ctx context.Context, ad channel.Adapter, ib channel.Inbound, produced []agent.Event) {
+	sender, ok := ad.(channel.MediaSender)
+	if !ok || len(produced) == 0 {
+		return
+	}
+	files := make([]channel.File, 0, len(produced))
+	for _, ev := range produced {
+		art, data, err := s.st.ReadArtifact(ev.Artifact)
+		if err != nil {
+			continue
+		}
+		if len(data) > channel.MaxOutboundFileBytes {
+			continue
+		}
+		name := ev.Name
+		if name == "" {
+			name = art.ID
+		}
+		files = append(files, channel.File{Name: name, Mime: art.Mime, Data: data})
+	}
+	if len(files) == 0 {
+		return
+	}
+	if err := sender.SendMedia(ctx, ib.ChatID, files, ib.MessageID); err != nil {
+		s.logf("channel %s media: %v", ad.Name(), err)
+	}
 }

@@ -163,3 +163,94 @@ func TestHandleEvent(t *testing.T) {
 		t.Fatal("no group inbound event")
 	}
 }
+
+func TestSendMediaUploadFlow(t *testing.T) {
+	var uploads, messages int
+	var lastUpload, lastMsg map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		body := map[string]any{}
+		_ = json.Unmarshal(raw, &body)
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/app/getAppAccessToken"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 7200})
+		case strings.HasSuffix(r.URL.Path, "/files"):
+			uploads++
+			lastUpload = body
+			_ = json.NewEncoder(w).Encode(map[string]any{"file_info": "FI/abc"})
+		case strings.HasSuffix(r.URL.Path, "/messages"):
+			messages++
+			lastMsg = body
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "m1"})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	ad := New(config.QQChannel{AppID: "app", APIBase: srv.URL}, "secret")
+	err := ad.SendMedia(context.Background(), "u:openid-1",
+		[]channel.File{{Name: "shot.png", Mime: "image/png", Data: []byte("PNGDATA")}}, "src-msg")
+	if err != nil {
+		t.Fatalf("SendMedia: %v", err)
+	}
+	if uploads != 1 || messages != 1 {
+		t.Fatalf("uploads=%d messages=%d", uploads, messages)
+	}
+	if lastUpload["file_type"] != float64(1) {
+		t.Fatalf("file_type = %v, want 1 (image)", lastUpload["file_type"])
+	}
+	if lastUpload["srv_send_msg"] != false {
+		t.Fatalf("srv_send_msg = %v, want false", lastUpload["srv_send_msg"])
+	}
+	if lastMsg["msg_type"] != float64(7) {
+		t.Fatalf("msg_type = %v, want 7", lastMsg["msg_type"])
+	}
+	media, _ := lastMsg["media"].(map[string]any)
+	if media["file_info"] != "FI/abc" {
+		t.Fatalf("media = %v", lastMsg["media"])
+	}
+	if lastMsg["msg_id"] != "src-msg" {
+		t.Fatalf("msg_id = %v", lastMsg["msg_id"])
+	}
+	if _, ok := lastMsg["msg_seq"]; !ok {
+		t.Fatal("msg_seq missing")
+	}
+}
+
+func TestInboundAttachmentDownload(t *testing.T) {
+	var authHeader string
+	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader = r.Header.Get("Authorization")
+		w.Header().Set("content-type", "image/png")
+		_, _ = w.Write([]byte("PNGDATA"))
+	}))
+	defer media.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 7200})
+	}))
+	defer srv.Close()
+
+	ad := New(config.QQChannel{AppID: "app", APIBase: srv.URL}, "secret")
+	in := make(chan channel.Inbound, 1)
+	raw := []byte(`{"id":"m1","content":"","author":{"user_openid":"u1"},"attachments":[{"content_type":"image/png","url":"` + media.URL + `/a.png","filename":"a.png","size":7}]}`)
+	if err := ad.handleEvent(context.Background(), "C2C_MESSAGE_CREATE", raw, in); err != nil {
+		t.Fatalf("handleEvent: %v", err)
+	}
+	select {
+	case got := <-in:
+		if len(got.Attachments) != 1 {
+			t.Fatalf("attachments = %d", len(got.Attachments))
+		}
+		att := got.Attachments[0]
+		if att.Kind != "image" || att.Mime != "image/png" || string(att.Data) != "PNGDATA" || att.Name != "a.png" {
+			t.Fatalf("attachment = %+v", att)
+		}
+		if authHeader != "QQBot tok" {
+			t.Fatalf("authorization = %q", authHeader)
+		}
+	default:
+		t.Fatal("no inbound event")
+	}
+}

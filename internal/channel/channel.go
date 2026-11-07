@@ -14,12 +14,13 @@ type Caps struct {
 
 // Inbound is one received message.
 type Inbound struct {
-	Channel   string
-	ChatID    string
-	UserID    string
-	Text      string
-	MessageID string
-	IsGroup   bool
+	Channel     string
+	ChatID      string
+	UserID      string
+	Text        string
+	MessageID   string
+	IsGroup     bool
+	Attachments []Attachment
 }
 
 // Outbound is one message to send.

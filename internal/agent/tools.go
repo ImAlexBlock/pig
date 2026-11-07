@@ -39,6 +39,39 @@ func (a *Agent) runToolBatch(ctx context.Context, st *runState, calls []provider
 			a.notice(st, "failed to persist tool result: "+err.Error())
 			return
 		}
+		a.attachToolImages(st, c.ToolName, res.Images)
+	}
+}
+
+// attachToolImages stores images a tool returned and surfaces them to the model
+// (as an image-bearing user turn) and to the client (as run events).
+func (a *Agent) attachToolImages(st *runState, toolName string, images []tool.Image) {
+	if len(images) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(images))
+	for _, img := range images {
+		mime := img.MediaType
+		if mime == "" {
+			mime = "image/png"
+		}
+		art, err := a.Store.PutArtifact(st.sess.ID, mime, img.Data)
+		if err != nil {
+			continue
+		}
+		ids = append(ids, art.ID)
+		a.emit(Event{
+			Type: EvArtifact, RunID: st.runID, SessionID: st.sess.ID,
+			Artifact: art.ID, Mime: art.Mime, Name: toolName,
+		})
+	}
+	if len(ids) == 0 {
+		return
+	}
+	text := fmt.Sprintf("tool %s returned %d image(s); they are attached below.", toolName, len(ids))
+	content := store.NewMessageContent(store.MessageContent{Text: text, Attachments: ids})
+	if _, err := a.Store.AppendEntry(st.sess.ID, store.KindMessage, "user", content, 16); err != nil {
+		a.notice(st, "failed to attach tool images: "+err.Error())
 	}
 }
 

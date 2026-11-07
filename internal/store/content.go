@@ -9,6 +9,9 @@ type MessageContent struct {
 	Provider  string          `json:"provider,omitempty"`
 	Model     string          `json:"model,omitempty"`
 	Raw       json.RawMessage `json:"raw,omitempty"`
+	// Attachments lists artifact ids shown to the model alongside Text
+	// (inbound chat images, screenshots produced by tools).
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // ToolCallContent is the body of a tool_call entry.

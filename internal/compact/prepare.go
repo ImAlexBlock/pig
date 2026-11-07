@@ -93,6 +93,20 @@ func Project(cmp *store.Compaction, entries []*store.Entry, opt ProjectOptions) 
 		return nil
 	}
 
+	attachBlocks := func(m store.MessageContent) []provider.Block {
+		var extra []provider.Block
+		for _, id := range m.Attachments {
+			if opt.ImageInput && opt.LoadFrame != nil {
+				if mime, data, ok := opt.LoadFrame(id); ok && strings.HasPrefix(mime, "image/") {
+					extra = append(extra, provider.Block{Type: provider.BlockImage, Image: &provider.Image{MediaType: mime, Data: data}})
+					continue
+				}
+			}
+			extra = append(extra, provider.Block{Type: provider.BlockText, Text: "[attachment artifact://" + id + "]"})
+		}
+		return extra
+	}
+
 	for _, e := range entries {
 		switch e.Kind {
 		case store.KindMessage:
@@ -109,6 +123,7 @@ func Project(cmp *store.Compaction, entries []*store.Entry, opt ProjectOptions) 
 			if m.Text != "" {
 				blocks = append(blocks, provider.Block{Type: provider.BlockText, Text: m.Text})
 			}
+			blocks = append(blocks, attachBlocks(m)...)
 			if len(blocks) == 0 {
 				continue
 			}

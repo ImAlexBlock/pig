@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math/rand"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -57,7 +60,9 @@ func New(cfg config.QQChannel, secret string) *Adapter {
 func (a *Adapter) Name() string { return "qq" }
 
 func (a *Adapter) Caps() channel.Caps {
-	return channel.Caps{Edit: true, Stream: true, Markdown: a.Cfg.Markdown, MaxChars: 1800}
+	// 2000 chars keeps a typical answer inside the five passive replies QQ
+	// allows per inbound message.
+	return channel.Caps{Edit: true, Stream: true, Markdown: a.Cfg.Markdown, MaxChars: 2000}
 }
 
 func (a *Adapter) markSeen(id string) bool {
@@ -77,6 +82,11 @@ func (a *Adapter) markSeen(id string) bool {
 		delete(a.seen, old)
 	}
 	return true
+}
+
+// randomSeq returns a fresh msg_seq for an active (non-reply) message.
+func (a *Adapter) randomSeq() int {
+	return int((time.Now().Unix()%100000000 ^ int64(rand.Uint32()&0xFFFF)) % 65536)
 }
 
 // nextSeq returns the next reply sequence for a passive message. QQ allows at
@@ -110,6 +120,12 @@ type messageData struct {
 		MemberOpenID string `json:"member_openid"`
 	} `json:"author"`
 	GroupOpenID string `json:"group_openid"`
+	Attachments []struct {
+		ContentType string `json:"content_type"`
+		URL         string `json:"url"`
+		Filename    string `json:"filename"`
+		Size        int    `json:"size"`
+	} `json:"attachments"`
 }
 
 func (a *Adapter) gatewayURL(ctx context.Context) string {
@@ -286,11 +302,87 @@ func (a *Adapter) handleEvent(ctx context.Context, typ string, raw json.RawMessa
 		ib.UserID = d.Author.MemberOpenID
 		ib.IsGroup = true
 	}
+	for _, att := range d.Attachments {
+		if att.URL == "" {
+			continue
+		}
+		media, err := a.fetchAttachment(ctx, att.URL, att.ContentType, att.Filename, att.Size)
+		if err != nil {
+			continue
+		}
+		ib.Attachments = append(ib.Attachments, media)
+	}
 	select {
 	case in <- ib:
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+// fetchAttachment downloads a chat attachment with the bot token.
+func (a *Adapter) fetchAttachment(ctx context.Context, url, contentType, filename string, size int) (channel.Attachment, error) {
+	if size > channel.MaxInboundFileBytes {
+		return channel.Attachment{}, fmt.Errorf("attachment too large: %d bytes", size)
+	}
+	token, err := a.Token.Get(ctx)
+	if err != nil {
+		return channel.Attachment{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return channel.Attachment{}, err
+	}
+	req.Header.Set("Authorization", "QQBot "+token)
+	resp, err := a.Client.Do(req)
+	if err != nil {
+		return channel.Attachment{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return channel.Attachment{}, fmt.Errorf("attachment fetch: status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, channel.MaxInboundFileBytes+1))
+	if err != nil {
+		return channel.Attachment{}, err
+	}
+	if len(data) > channel.MaxInboundFileBytes {
+		return channel.Attachment{}, fmt.Errorf("attachment too large")
+	}
+	mime := strings.TrimSpace(contentType)
+	if mime == "" {
+		mime = mimeByExt(filename)
+	}
+	kind := "file"
+	switch {
+	case strings.HasPrefix(mime, "image/"):
+		kind = "image"
+	case strings.HasPrefix(mime, "audio/"), mime == "voice":
+		kind, mime = "audio", "audio/ogg"
+	}
+	if filename == "" {
+		filename = "attachment"
+	}
+	return channel.Attachment{Kind: kind, Name: filename, Mime: mime, Data: data}, nil
+}
+
+func mimeByExt(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".pdf":
+		return "application/pdf"
+	case ".txt", ".md":
+		return "text/plain"
+	case ".json":
+		return "application/json"
+	}
+	return "application/octet-stream"
 }
 
 func writeJSON(ctx context.Context, conn *websocket.Conn, v any) error {
