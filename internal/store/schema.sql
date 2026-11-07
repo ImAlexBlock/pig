@@ -1,0 +1,50 @@
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+PRAGMA busy_timeout=5000;
+PRAGMA foreign_keys=ON;
+
+CREATE TABLE IF NOT EXISTS schema_meta(version INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions(
+  id TEXT PRIMARY KEY, parent_id TEXT, forked_from_seq INTEGER NOT NULL DEFAULT 0,
+  depth INTEGER NOT NULL DEFAULT 0,
+  title TEXT NOT NULL DEFAULT '', cwd TEXT NOT NULL, model TEXT NOT NULL,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, archived INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS entries(
+  id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL, kind TEXT NOT NULL, role TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL, tokens INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS entries_session_seq ON entries(session_id, seq);
+CREATE TABLE IF NOT EXISTS compactions(
+  id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  entry_id TEXT NOT NULL, method TEXT NOT NULL, summary TEXT NOT NULL,
+  first_kept_seq INTEGER NOT NULL, source_text TEXT NOT NULL DEFAULT '',
+  frames TEXT NOT NULL DEFAULT '[]', tokens_before INTEGER NOT NULL,
+  tokens_after INTEGER NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS artifacts(
+  id TEXT PRIMARY KEY, session_id TEXT NOT NULL, path TEXT NOT NULL,
+  mime TEXT NOT NULL, bytes INTEGER NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS usage(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+  provider TEXT NOT NULL, model TEXT NOT NULL, input INTEGER, output INTEGER,
+  cache_read INTEGER, cache_write INTEGER, cost_usd REAL, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS rtk_savings(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, command TEXT NOT NULL,
+  rule TEXT NOT NULL, raw_bytes INTEGER NOT NULL, filtered_bytes INTEGER NOT NULL,
+  created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS memory(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL UNIQUE,
+  value TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS channel_state(
+  channel TEXT NOT NULL, chat_id TEXT NOT NULL, session_id TEXT NOT NULL,
+  paired INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL,
+  PRIMARY KEY(channel, chat_id));
+CREATE TABLE IF NOT EXISTS jobs(
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT NOT NULL,
+  parent_session_id TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL,
+  origin_channel TEXT NOT NULL DEFAULT '', origin_chat TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '', tools TEXT NOT NULL DEFAULT '[]', priority INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL, result TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL, started_at INTEGER NOT NULL DEFAULT 0,
+  ended_at INTEGER NOT NULL DEFAULT 0, notified INTEGER NOT NULL DEFAULT 0,
+  deliver_result INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS jobs_status_priority ON jobs(status, priority, created_at);

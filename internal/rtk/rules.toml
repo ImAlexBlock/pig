@@ -1,0 +1,35 @@
+[[rule]]
+id = "git-status"
+match = "^git\\s+status(\\s|$)"
+rewrite = "git status --porcelain=v1 --branch"
+filter = "git-status"
+
+[[rule]]
+id = "git-diff"
+match = "^git\\s+diff(\\s|$)"
+filter = "git-diff"
+
+[[rule]]
+id = "git-log"
+match = "^git\\s+log(\\s|$)"
+filter = "git-log"
+
+[[rule]]
+id = "ls"
+match = "^(ls|tree)(\\s|$)"
+filter = "listing"
+
+[[rule]]
+id = "grep"
+match = "^(grep|rg)(\\s|$)"
+filter = "grep"
+
+[[rule]]
+id = "go-test"
+match = "^go\\s+test(\\s|$)"
+filter = "go-test"
+
+[[rule]]
+id = "build"
+match = "^(go\\s+build|npm|pnpm|bun|yarn|pytest|cargo|docker|kubectl)(\\s|$)"
+filter = "generic"

@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"run.event","params":{"run_id":"run_x","event":{"type":"text_delta","text":"hi"}}}

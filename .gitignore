@@ -1,0 +1,26 @@
+# build output
+/pig
+/pig.exe
+
+# runtime state that must never be committed
+.pig/
+*.env
+auth.env
+config.toml
+config.toml.bak
+*.db
+*.db-shm
+*.db-wal
+artifacts/
+logs/
+
+# benchmark artifacts (worktrees, traces, venv)
+bench/.venv/
+bench/results/
+
+# local scratch
+.ompprobe/
+
+# python bytecode
+__pycache__/
+*.pyc

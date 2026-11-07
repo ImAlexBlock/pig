@@ -1,0 +1,40 @@
+ M src/mod0.go
+ M src/mod1.go
+ M src/mod2.go
+?? notes.txt
+?? tmp/
+A  src/new00.go
+A  src/new01.go
+A  src/new02.go
+A  src/new03.go
+A  src/new04.go
+A  src/new05.go
+A  src/new06.go
+A  src/new07.go
+A  src/new08.go
+A  src/new09.go
+A  src/new10.go
+A  src/new11.go
+A  src/new12.go
+A  src/new13.go
+A  src/new14.go
+A  src/new15.go
+A  src/new16.go
+A  src/new17.go
+A  src/new18.go
+A  src/new19.go
+D  src/old00.go
+D  src/old01.go
+D  src/old02.go
+D  src/old03.go
+D  src/old04.go
+D  src/old05.go
+D  src/old06.go
+D  src/old07.go
+D  src/old08.go
+D  src/old09.go
+D  src/old10.go
+D  src/old11.go
+D  src/old12.go
+D  src/old13.go
+D  src/old14.go
