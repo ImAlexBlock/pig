@@ -39,7 +39,31 @@ func (a *Agent) runToolBatch(ctx context.Context, st *runState, calls []provider
 			a.notice(st, "failed to persist tool result: "+err.Error())
 			return
 		}
-		a.attachToolImages(st, c.ToolName, res.Images)
+		a.attachToolMedia(st, c.ToolName, res.Images, res.Files)
+	}
+}
+
+// attachToolMedia stores files and images a tool returned and surfaces them to
+// the model (as an image-bearing user turn) and to the client (run events).
+func (a *Agent) attachToolMedia(st *runState, toolName string, images []tool.Image, files []tool.SentFile) {
+	a.attachToolImages(st, toolName, images)
+	for _, f := range files {
+		mime := f.Mime
+		if mime == "" {
+			mime = "application/octet-stream"
+		}
+		art, err := a.Store.PutArtifact(st.sess.ID, mime, f.Data)
+		if err != nil {
+			continue
+		}
+		name := f.Name
+		if name == "" {
+			name = art.ID
+		}
+		a.emit(Event{
+			Type: EvArtifact, RunID: st.runID, SessionID: st.sess.ID,
+			Artifact: art.ID, Mime: art.Mime, Name: name,
+		})
 	}
 }
 

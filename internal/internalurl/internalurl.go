@@ -418,3 +418,6 @@ func RenderLinePrefixed(text string, firstLine int, raw bool) string {
 	}
 	return sb.String()
 }
+
+// MimeByName guesses a MIME type from a file extension.
+func MimeByName(p string) string { return mimeByExt(p) }

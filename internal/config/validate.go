@@ -4,7 +4,7 @@ import "fmt"
 
 // KnownTools is the set of tool names the binary registers. tools.enabled must
 // be a subset of it.
-var KnownTools = []string{"read", "write", "edit", "bash", "todo", "task", "job", "browser", "search", "memory"}
+var KnownTools = []string{"read", "write", "edit", "bash", "todo", "task", "job", "browser", "search", "memory", "send"}
 
 // KnownProviders is the set of supported provider wire kinds.
 var KnownProviders = []string{"anthropic", "openai-chat", "openai-responses", "mock"}

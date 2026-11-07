@@ -319,3 +319,30 @@ func TestMemoryStoreCap(t *testing.T) {
 		t.Fatalf("facts = %d, want <= %d", n, MaxFactStore)
 	}
 }
+
+func TestSendTool(t *testing.T) {
+	env, dir := testEnv(t)
+	path := filepath.Join(dir, "report.md")
+	if err := os.WriteFile(path, []byte("# hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := call(t, sendTool{}, map[string]any{"path": "report.md", "caption": "report"}, env)
+	if res.IsError {
+		t.Fatalf("send failed: %s", res.Text)
+	}
+	if len(res.Files) != 1 {
+		t.Fatalf("files = %d", len(res.Files))
+	}
+	if res.Files[0].Name != "report.md" || res.Files[0].Mime != "text/markdown" || string(res.Files[0].Data) != "# hi\n" {
+		t.Fatalf("file = %+v", res.Files[0])
+	}
+	if res.Text != "report" {
+		t.Fatalf("text = %q", res.Text)
+	}
+	if miss := call(t, sendTool{}, map[string]any{"path": "nope.bin"}, env); !miss.IsError || !strings.Contains(miss.Text, "file not found") {
+		t.Fatalf("missing file result = %+v", miss)
+	}
+	if dirRes := call(t, sendTool{}, map[string]any{"path": "."}, env); !dirRes.IsError {
+		t.Fatal("directory accepted")
+	}
+}

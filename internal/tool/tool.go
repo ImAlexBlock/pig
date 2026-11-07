@@ -26,14 +26,22 @@ type Image struct {
 	Data      []byte `json:"-"`
 }
 
+// SentFile is a file the tool wants delivered to the user's chat.
+type SentFile struct {
+	Name string
+	Mime string
+	Data []byte
+}
+
 // Result is the outcome of a tool call.
 type Result struct {
-	Text     string  `json:"text"`
-	Images   []Image `json:"images,omitempty"`
-	Artifact string  `json:"artifact,omitempty"`
-	IsError  bool    `json:"is_error,omitempty"`
-	Useless  bool    `json:"useless,omitempty"`
-	Display  string  `json:"display,omitempty"`
+	Text     string     `json:"text"`
+	Images   []Image    `json:"images,omitempty"`
+	Files    []SentFile `json:"files,omitempty"`
+	Artifact string     `json:"artifact,omitempty"`
+	IsError  bool       `json:"is_error,omitempty"`
+	Useless  bool       `json:"useless,omitempty"`
+	Display  string     `json:"display,omitempty"`
 }
 
 // Error builds an error result.
@@ -230,5 +238,6 @@ func Builtin() *Registry {
 	r.Register(taskTool{})
 	r.Register(jobTool{})
 	r.Register(memoryTool{})
+	r.Register(sendTool{})
 	return r
 }

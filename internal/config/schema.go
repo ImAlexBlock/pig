@@ -200,7 +200,7 @@ func Default() *Config {
 			ContextFiles: []string{"AGENTS.md"},
 		},
 		Tools: Tools{
-			Enabled:            []string{"read", "write", "edit", "bash", "todo", "task", "job", "browser", "search", "memory"},
+			Enabled:            []string{"read", "write", "edit", "bash", "todo", "task", "job", "browser", "search", "memory", "send"},
 			BashTimeoutSeconds: 120,
 			MaxOutputBytes:     65536,
 		},
@@ -210,7 +210,7 @@ func Default() *Config {
 		},
 		Subagents: Subagents{
 			MaxDepth:      1,
-			DefaultTools:  []string{"read", "write", "edit", "bash", "todo", "browser", "search", "memory"},
+			DefaultTools:  []string{"read", "write", "edit", "bash", "todo", "browser", "search", "memory", "send"},
 			ResultMaxChar: 8000,
 		},
 		Background: Background{
