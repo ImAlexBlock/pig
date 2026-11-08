@@ -153,24 +153,40 @@ func TestProgressQQWaitsForWork(t *testing.T) {
 		t.Fatalf("want no update while cooling down, got %v", ad.messages())
 	}
 
-	// Past the milestone the second and last status goes out.
+	// Too soon for the next status: at most one a minute.
 	p.mu.Lock()
-	p.startedAt = time.Now().Add(-milestoneAfter - time.Second)
+	p.lastStatusAt = time.Now().Add(-10 * time.Second)
+	p.lastUpdate = time.Time{}
+	p.mu.Unlock()
+	if err := p.flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(ad.messages()); n != 1 {
+		t.Fatalf("status repeated inside a minute: %v", ad.messages())
+	}
+
+	// A minute later the second and last status goes out.
+	p.mu.Lock()
+	p.lastStatusAt = time.Now().Add(-statusEvery - time.Second)
 	p.lastUpdate = time.Time{}
 	p.mu.Unlock()
 	if err := p.flush(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(ad.messages()); n != 2 {
-		t.Fatalf("want a milestone, got %v", ad.messages())
+		t.Fatalf("want a second status, got %v", ad.messages())
 	}
 
+	// maxStatuses caps it: no third bubble even after another minute.
+	p.mu.Lock()
+	p.lastStatusAt = time.Now().Add(-2 * statusEvery)
 	p.lastUpdate = time.Time{}
+	p.mu.Unlock()
 	if err := p.flush(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(ad.messages()); n != 2 {
-		t.Fatalf("milestone repeated: %v", ad.messages())
+		t.Fatalf("third status sent: %v", ad.messages())
 	}
 }
 

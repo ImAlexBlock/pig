@@ -408,7 +408,7 @@ Progress is one status line, rendered from the run events:
 | Channel | Behaviour |
 |---|---|
 | editing channels (Telegram) | the line is sent once and edited every 3 s; the first answer chunk replaces it |
-| QQ direct chat | cannot edit, so the first line waits until 6 s or the first finished tool, then at most one milestone at 90 s, and only while at least three passive replies remain |
+| QQ direct chat | text mode cannot edit a message, so the first line waits until 6 s or the first finished tool, then at most one more per minute, two in total, and only while at least three passive replies remain |
 | QQ group chat | silent: every status would cost a passive reply |
 
 The answer is budgeted against the same passive window: past the remaining
@@ -420,6 +420,9 @@ session://<id>]` instead of failing to send.
 - Text is `msg_type: 0` with `content`. Markdown (`msg_type: 2`) is accepted by
   the API but the desktop client shows "该消息类型暂不支持查看" unless the bot is
   whitelisted, so markdown defaults to off.
+- Text mode has no message edit: `Caps().Edit` is only true when markdown is on,
+  and `Update` refuses instead of falling back to `Send`, which would post a new
+  bubble on every progress tick.
 - Every reply chunk carries `msg_id`, `msg_seq` and, in text mode,
   `message_reference`. A chunk without `msg_id` becomes an active message and
   renders as an unsupported type.
@@ -546,7 +549,7 @@ what the five-passive-reply and chunking logic in the channel has to absorb.
 | Area | Limitation | Mitigation in place |
 |---|---|---|
 | channels | one adapter reader goroutine per channel | messages are dispatched per chat with arrival order kept; commands run immediately |
-| QQ | five passive replies per inbound message | one status, one milestone at most, 2000-character chunks, tail replaced by a session pointer |
+| QQ | five passive replies per inbound message | at most two status lines a minute apart, 2000-character chunks, tail replaced by a session pointer |
 | vision | the reference provider route returns 504 for image input, so the deployed model declares `input = ["text"]` | attachments degrade to artifact references |
 | convergence | only byte-identical tool batches are caught | soft round notice at 30, hard cap at 500 |
 | storage | no artifact garbage collection | artifacts are small; prune manually if needed |

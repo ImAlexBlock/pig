@@ -19,9 +19,12 @@ const (
 	// firstStatusDelay keeps QQ from spending a passive reply on a status line
 	// before there is anything to report.
 	firstStatusDelay = 6 * time.Second
-	// milestoneAfter sends one more status line for long runs, if slots allow.
-	milestoneAfter = 90 * time.Second
-	// milestoneMinSlots is the free-slot floor below which no extra status is
+	// statusEvery paces further status lines on channels that cannot edit a
+	// message: each one costs a passive reply.
+	statusEvery = 60 * time.Second
+	// maxStatuses caps the status lines a run may post on such a channel.
+	maxStatuses = 2
+	// milestoneMinSlots is the free-slot floor below which no further status is
 	// sent: the answer needs those replies.
 	milestoneMinSlots = 3
 )
@@ -33,18 +36,19 @@ type chatProgress struct {
 	replyTo string
 	ch      chan agent.Event
 
-	mu         sync.Mutex
-	text       strings.Builder
-	handle     channel.Handle
-	lastUpdate time.Time
-	notices    []string
-	startedAt  time.Time
-	steps      int
-	lastTool   string
-	phase      string
-	ctxTokens  int
-	sentFirst  bool
-	milestone  bool
+	mu           sync.Mutex
+	text         strings.Builder
+	handle       channel.Handle
+	lastUpdate   time.Time
+	notices      []string
+	startedAt    time.Time
+	steps        int
+	lastTool     string
+	phase        string
+	ctxTokens    int
+	sentFirst    bool
+	statuses     int
+	lastStatusAt time.Time
 }
 
 func newChatProgress(ad channel.Adapter, chatID, replyTo string) *chatProgress {
@@ -142,9 +146,11 @@ func (p *chatProgress) flush(ctx context.Context) error {
 
 	p.mu.Lock()
 	elapsed := time.Since(p.startedAt)
-	sent, milestone := p.sentFirst, p.milestone
+	sent := p.sentFirst
 	handle := p.handle
 	recent := time.Since(p.lastUpdate)
+	since := time.Since(p.lastStatusAt)
+	statuses := p.statuses
 	steps := p.steps
 	text := p.statusLocked(elapsed)
 	p.mu.Unlock()
@@ -153,13 +159,15 @@ func (p *chatProgress) flush(ctx context.Context) error {
 		return nil
 	}
 	if !editable {
-		// Without message editing every update costs a passive reply: wait for
-		// real work, then send one milestone at most.
-		if !sent && elapsed < firstStatusDelay && steps == 0 {
-			return nil
-		}
-		if sent {
-			if milestone || elapsed < milestoneAfter {
+		// Without message editing every status costs a passive reply: wait for
+		// real work, then post at most one line a minute and never more than
+		// maxStatuses per run.
+		if !sent {
+			if elapsed < firstStatusDelay && steps == 0 {
+				return nil
+			}
+		} else {
+			if statuses >= maxStatuses || since < statusEvery {
 				return nil
 			}
 			if sr, ok := p.adapter.(channel.SlotReporter); ok && sr.RemainingSlots(p.chatID, p.replyTo) < milestoneMinSlots {
@@ -178,9 +186,8 @@ func (p *chatProgress) flush(ctx context.Context) error {
 				p.handle = h
 			}
 			p.sentFirst = true
-			if sent {
-				p.milestone = true
-			}
+			p.statuses++
+			p.lastStatusAt = time.Now()
 		}
 		p.mu.Unlock()
 		return err

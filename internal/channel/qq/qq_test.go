@@ -280,3 +280,43 @@ func TestRemainingSlots(t *testing.T) {
 		t.Fatal("sixth passive reply accepted")
 	}
 }
+
+// Text mode is append-only: advertising an edit would make the daemon post a
+// new bubble for every progress tick.
+func TestTextModeCannotEdit(t *testing.T) {
+	text := New(config.QQChannel{AppID: "1", APIBase: "https://api.bot.qq.com"}, "s")
+	if text.Caps().Edit {
+		t.Fatal("text mode must not advertise editing")
+	}
+	md := New(config.QQChannel{AppID: "1", APIBase: "https://api.bot.qq.com", Markdown: true}, "s")
+	if !md.Caps().Edit {
+		t.Fatal("markdown mode should advertise editing")
+	}
+}
+
+func TestUpdateNeverSendsInTextMode(t *testing.T) {
+	var sends int
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		if strings.Contains(r.URL.Path, "/messages") || strings.Contains(r.URL.Path, "/stream_messages") {
+			mu.Lock()
+			sends++
+			mu.Unlock()
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"access_token":"tok","expires_in":600}`))
+	}))
+	defer srv.Close()
+
+	a := New(config.QQChannel{AppID: "1", APIBase: srv.URL}, "sec")
+	_ = a.Update(context.Background(), channel.Handle{ID: "h1"},
+		channel.Outbound{ChatID: PrefixUser + "u", Text: "x", ReplyTo: "m1", Markdown: false})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if sends != 0 {
+		t.Fatalf("Update posted %d message request(s) in text mode", sends)
+	}
+}

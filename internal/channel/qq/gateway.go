@@ -61,8 +61,10 @@ func (a *Adapter) Name() string { return "qq" }
 
 func (a *Adapter) Caps() channel.Caps {
 	// 2000 chars keeps a typical answer inside the five passive replies QQ
-	// allows per inbound message.
-	return channel.Caps{Edit: true, Stream: true, Markdown: a.Cfg.Markdown, MaxChars: 2000}
+	// allows per inbound message. Editing only exists through the streaming
+	// endpoint, which the client can only render as markdown, so text mode is
+	// append-only: a status message cannot be updated in place.
+	return channel.Caps{Edit: a.Cfg.Markdown, Stream: a.Cfg.Markdown, Markdown: a.Cfg.Markdown, MaxChars: 2000}
 }
 
 func (a *Adapter) markSeen(id string) bool {

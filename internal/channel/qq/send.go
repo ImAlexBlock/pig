@@ -145,8 +145,9 @@ func (a *Adapter) Update(ctx context.Context, h channel.Handle, o channel.Outbou
 			return nil
 		}
 	}
-	_, err := a.Send(ctx, o)
-	return err
+	// QQ has no message edit outside markdown streaming. Falling back to Send
+	// here would post a new bubble on every progress tick.
+	return fmt.Errorf("qq: message edit unsupported in text mode")
 }
 
 // truncate shortens debug output.
