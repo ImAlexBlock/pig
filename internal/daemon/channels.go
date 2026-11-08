@@ -344,7 +344,7 @@ func (s *Server) consumeChannel(ctx context.Context, ad channel.Adapter, in <-ch
 			// A run takes minutes; the reader must not block on it or a /stop
 			// sent mid-run would only be seen after the run finished.
 			if strings.HasPrefix(strings.TrimSpace(ib.Text), "/") {
-				go s.handleChannelMessage(ctx, ad, ib)
+				go s.handleChannelMessage(ctx, ad, ib, nil)
 				continue
 			}
 			s.dispatchMessage(ctx, ad, ib)
@@ -353,10 +353,14 @@ func (s *Server) consumeChannel(ctx context.Context, ad channel.Adapter, in <-ch
 }
 
 // dispatchMessage handles one message without blocking the adapter reader while
-// keeping arrival order per chat.
+// keeping arrival order per chat. The chain only orders the start of a turn: a
+// message that arrives during a run must enqueue and acknowledge immediately,
+// not wait for that run to finish.
 func (s *Server) dispatchMessage(ctx context.Context, ad channel.Adapter, ib channel.Inbound) {
 	key := ad.Name() + "|" + ib.ChatID
 	done := make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(done) }) }
 
 	s.chatMu.Lock()
 	prev := s.chatTail[key]
@@ -364,7 +368,7 @@ func (s *Server) dispatchMessage(ctx context.Context, ad channel.Adapter, ib cha
 	s.chatMu.Unlock()
 
 	go func() {
-		defer close(done)
+		defer release()
 		defer func() {
 			s.chatMu.Lock()
 			if s.chatTail[key] == done {
@@ -379,11 +383,11 @@ func (s *Server) dispatchMessage(ctx context.Context, ad channel.Adapter, ib cha
 				return
 			}
 		}
-		s.handleChannelMessage(ctx, ad, ib)
+		s.handleChannelMessage(ctx, ad, ib, release)
 	}()
 }
 
-func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, ib channel.Inbound) {
+func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, ib channel.Inbound, started func()) {
 	state, err := s.st.GetChannelState(ad.Name(), ib.ChatID)
 	if err != nil {
 		state = &store.ChannelState{Channel: ad.Name(), ChatID: ib.ChatID}
@@ -436,7 +440,7 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, i
 		state.SessionID = sess.ID
 		_ = s.st.SetChannelState(state)
 	}
-	s.channelRun(ctx, ad, ib, sess)
+	s.channelRun(ctx, ad, ib, sess, started)
 }
 
 func (s *Server) sessionForChat(channelName, chatID string) (*store.Session, error) {
@@ -670,7 +674,7 @@ func (s *Server) saveInboundAttachments(sessionID string, attachments []channel.
 	return ids, strings.Join(lines, "\n")
 }
 
-func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.Inbound, sess *store.Session) {
+func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.Inbound, sess *store.Session, started func()) {
 	attachIDs, attachNote := s.saveInboundAttachments(sess.ID, ib.Attachments)
 	prompt := ib.Text
 	if attachNote != "" {
@@ -689,6 +693,7 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 	})
 	defer s.fan.remove(sub)
 
+	adopt := make(chan string, 1)
 	runID, sessionID, queued, err := s.StartRun(runSpec{
 		SessionID:     sess.ID,
 		Prompt:        prompt,
@@ -697,24 +702,32 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 		Client:        ad.Name(),
 		OriginChannel: ad.Name(),
 		OriginChat:    ib.ChatID,
+		Adopt:         adopt,
 	})
+	if started != nil {
+		started()
+	}
 	if err != nil {
 		s.sendText(ctx, ad, ib.ChatID, "error: "+err.Error(), ib.MessageID)
 		return
 	}
 	if queued {
-		// Wait until the queued turn becomes the active run.
-		deadline := time.Now().Add(10 * time.Minute)
-		for time.Now().Before(deadline) {
-			if id, _, ok := s.ActiveRun(sessionID); ok && id != runID {
-				runID = id
-				break
-			}
-			select {
-			case <-ctx.Done():
+		// Appended to the turn that is already running: acknowledge at once,
+		// then follow whichever run ends up carrying the input.
+		s.sendText(ctx, ad, ib.ChatID,
+			fmt.Sprintf("appended (#%d) · handled after the current step", s.QueueLen(sessionID)), ib.MessageID)
+		select {
+		case next := <-adopt:
+			if next == "" {
+				// Folded into the running turn as steering; that run answers.
 				return
-			case <-time.After(200 * time.Millisecond):
 			}
+			runID = next
+		case <-ctx.Done():
+			return
+		case <-time.After(30 * time.Minute):
+			s.logf("channel %s: queued turn never ran for %s", ad.Name(), sessionID)
+			return
 		}
 	}
 

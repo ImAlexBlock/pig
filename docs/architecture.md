@@ -404,8 +404,18 @@ text.
 
 Each inbound message is dispatched without blocking the adapter reader, so a
 command such as `/stop` reaches the daemon while a run is active. Messages keep
-arrival order per chat; commands run immediately. `/stop` cancels the active run,
-drops inputs queued behind it, and the run ends with `⏳ stopped after <elapsed>`.
+arrival order per chat, but the chain only orders the *start* of a turn:
+commands run immediately.
+
+A message that arrives during a run is appended to it. The daemon acknowledges
+at once with `appended (#1) · handled after the current step`, then folds the
+text into the running turn at its next safe boundary as a steering entry; that
+turn's own reply carries the answer, so nothing is delivered twice. If the run
+ends before folding, the queued prompt becomes the next run and the waiter
+adopts it.
+
+`/stop` cancels the active run, drops inputs queued behind it, and the run ends
+with `⏳ stopped after <elapsed>`.
 
 Progress is one status line, rendered from the run events:
 

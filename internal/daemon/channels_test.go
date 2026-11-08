@@ -87,7 +87,7 @@ func TestChannelPairingAndRun(t *testing.T) {
 	// Unpaired chat must be refused.
 	unpaired := chat
 	unpaired.Text = "hello"
-	srv.handleChannelMessage(ctx, ad, unpaired)
+	srv.handleChannelMessage(ctx, ad, unpaired, nil)
 	ad.waitFor(t, "pairing required", 5*time.Second)
 
 	// Wrong code is rejected.
@@ -96,13 +96,13 @@ func TestChannelPairingAndRun(t *testing.T) {
 	if pairing.Code() == "000000" {
 		wrong.Text = "/pair 111111"
 	}
-	srv.handleChannelMessage(ctx, ad, wrong)
+	srv.handleChannelMessage(ctx, ad, wrong, nil)
 	ad.waitFor(t, "pairing failed", 5*time.Second)
 
 	// Correct code binds the chat.
 	good := chat
 	good.Text = "/pair " + pairing.Code()
-	srv.handleChannelMessage(ctx, ad, good)
+	srv.handleChannelMessage(ctx, ad, good, nil)
 	ad.waitFor(t, "paired", 5*time.Second)
 
 	state, err := srv.Store().GetChannelState("fake", "chat-1")
@@ -123,19 +123,19 @@ func TestChannelPairingAndRun(t *testing.T) {
 	// /help works after pairing.
 	help := chat
 	help.Text = "/help"
-	srv.handleChannelMessage(ctx, ad, help)
+	srv.handleChannelMessage(ctx, ad, help, nil)
 	ad.waitFor(t, "/resume", 5*time.Second)
 
 	// A normal message runs the agent and replies with the answer.
 	msg := chat
 	msg.Text = "hi there"
-	srv.handleChannelMessage(ctx, ad, msg)
+	srv.handleChannelMessage(ctx, ad, msg, nil)
 	ad.waitFor(t, "mock: hi there", 30*time.Second)
 
 	// /status reports the binding.
 	status := chat
 	status.Text = "/status"
-	srv.handleChannelMessage(ctx, ad, status)
+	srv.handleChannelMessage(ctx, ad, status, nil)
 	ad.waitFor(t, "session:", 5*time.Second)
 
 	// The transcript records the user turn.
@@ -168,7 +168,7 @@ func TestChannelPairingBlocksAfterFiveAttempts(t *testing.T) {
 
 	chat := channel.Inbound{Channel: "fake", ChatID: "chat-2", UserID: "u2", MessageID: "m1", Text: "/pair 999999"}
 	for range 6 {
-		srv.handleChannelMessage(context.Background(), ad, chat)
+		srv.handleChannelMessage(context.Background(), ad, chat, nil)
 	}
 	ad.waitFor(t, "too many attempts", 5*time.Second)
 	if _, err := srv.Store().GetChannelState("fake", "chat-2"); err == nil {

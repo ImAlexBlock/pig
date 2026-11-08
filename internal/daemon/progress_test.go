@@ -408,3 +408,92 @@ func TestChannelNewAndSessions(t *testing.T) {
 		t.Fatalf("previous session missing: %q", out)
 	}
 }
+
+// A message sent while a turn is running must be appended to that turn and
+// acknowledged at once, instead of waiting for the run to finish.
+func TestChannelAppendMidRun(t *testing.T) {
+	t.Setenv("PIG_MOCK_SCRIPT", `{"turns":[{"text":"slow answer","delay_ms":6000},{"text":"after append"}]}`)
+	home := shortHome(t)
+	t.Setenv("PIG_HOME", home)
+	cfg := config.MockConfig(filepath.Join(home, "config.toml"))
+	cfg.Channel.Workdir = filepath.Join(home, "workdir")
+	srv := startTestServer(t, cfg, config.Paths{Home: home})
+
+	ad := &slotAdapter{name: "fake", slots: 20}
+	srv.channels = []channel.Adapter{ad}
+	pairing := channel.NewPairing("fake")
+	srv.pairings["fake"] = pairing
+
+	in := make(chan channel.Inbound, 8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.consumeChannel(ctx, ad, in)
+
+	chat := channel.Inbound{Channel: "fake", ChatID: "chat-1", UserID: "u1", MessageID: "m1"}
+	pair := chat
+	pair.Text = "/pair " + pairing.Code()
+	in <- pair
+	ad.waitFor(t, "paired", 5*time.Second)
+
+	state, err := srv.Store().GetChannelState("fake", "chat-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := chat
+	first.MessageID = "m2"
+	first.Text = "start the job"
+	in <- first
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, _, ok := srv.ActiveRun(state.SessionID); ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run never started; messages: %v", ad.messages())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	second := chat
+	second.MessageID = "m3"
+	second.Text = "还有一点补充"
+	sentAt := time.Now()
+	in <- second
+
+	ack := ad.waitFor(t, "appended (#1)", 3*time.Second)
+	if d := time.Since(sentAt); d > 2500*time.Millisecond {
+		t.Fatalf("ack took %v", d)
+	}
+	if !strings.Contains(ack, "current step") {
+		t.Fatalf("ack lacks the explanation: %q", ack)
+	}
+
+	// The running turn carries the appended text and answers once.
+	ad.waitFor(t, "after append", 20*time.Second)
+	time.Sleep(500 * time.Millisecond)
+	answers := 0
+	for _, m := range ad.messages() {
+		if strings.Contains(m, "after append") {
+			answers++
+		}
+	}
+	if answers != 1 {
+		t.Fatalf("want exactly one answer, got %d: %v", answers, ad.messages())
+	}
+
+	entries, err := srv.Store().AllEntries(state.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range entries {
+		if e.Kind == store.KindMessage && e.Role == "user" && strings.Contains(e.Message().Text, "还有一点补充") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("appended text missing from the transcript")
+	}
+}

@@ -36,6 +36,9 @@ type runSpec struct {
 	Queue         bool
 	OriginChannel string
 	OriginChat    string
+	// Adopt receives "" when a queued prompt is folded into the running turn,
+	// otherwise the id of the run that carries it. Optional.
+	Adopt chan string
 }
 
 // resolveSession returns an existing session or creates the default one.
@@ -78,7 +81,7 @@ func (s *Server) StartRun(spec runSpec) (string, string, bool, error) {
 			s.mu.Unlock()
 			return "", sess.ID, false, fmt.Errorf("run: session busy")
 		}
-		s.queue[sess.ID] = append(s.queue[sess.ID], queuedInput{Text: spec.Prompt, Model: spec.Model})
+		s.queue[sess.ID] = append(s.queue[sess.ID], queuedInput{Text: spec.Prompt, Model: spec.Model, Adopt: spec.Adopt})
 		id := active.ID
 		s.mu.Unlock()
 		return id, sess.ID, true, nil
@@ -126,7 +129,7 @@ func (s *Server) runLoop(rec *runRecord, spec runSpec) {
 		s.mu.Unlock()
 		close(rec.done)
 		if next != nil {
-			_, _, _, err := s.StartRun(runSpec{
+			id, _, _, err := s.StartRun(runSpec{
 				SessionID:     rec.SessionID,
 				Prompt:        next.Text,
 				Model:         next.Model,
@@ -137,7 +140,10 @@ func (s *Server) runLoop(rec *runRecord, spec runSpec) {
 			})
 			if err != nil {
 				s.logf("queued run: %v", err)
+				notifyAdopt(next, "")
+				return
 			}
+			notifyAdopt(next, id)
 		}
 	}()
 
@@ -216,11 +222,18 @@ func (s *Server) boundary(_ context.Context, info agent.BoundaryInfo) (string, s
 
 	s.mu.Lock()
 	var steering string
+	var folded *queuedInput
 	if q := s.queue[info.SessionID]; len(q) > 0 {
 		steering = q[0].Text
+		folded = &q[0]
 		s.queue[info.SessionID] = q[1:]
 	}
 	s.mu.Unlock()
+	if folded != nil {
+		// Empty id: the running turn already carries this input, so its own
+		// channel session answers and the waiter can stop.
+		notifyAdopt(folded, "")
+	}
 	return steering, ""
 }
 
@@ -323,6 +336,24 @@ func (s *Server) Detach(runID string) error {
 }
 
 // ActiveRun returns the run id and session for a session.
+// notifyAdopt tells a waiting client what happened to its queued prompt.
+func notifyAdopt(item *queuedInput, runID string) {
+	if item == nil || item.Adopt == nil {
+		return
+	}
+	select {
+	case item.Adopt <- runID:
+	default:
+	}
+}
+
+// QueueLen reports how many inputs wait behind the active run for a session.
+func (s *Server) QueueLen(sessionID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.queue[sessionID])
+}
+
 // ClearQueue drops inputs waiting behind the active run for a session and
 // reports how many were dropped.
 func (s *Server) ClearQueue(sessionID string) int {

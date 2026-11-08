@@ -79,6 +79,9 @@ type Server struct {
 type queuedInput struct {
 	Text  string
 	Model string
+	// Adopt reports what happened to the input: "" when it was folded into the
+	// running turn as steering, or the run id that carries it otherwise.
+	Adopt chan string
 }
 
 // New builds a daemon server, opening the store and registering tools.
