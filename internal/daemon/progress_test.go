@@ -336,3 +336,75 @@ func TestChannelStopDuringRun(t *testing.T) {
 		}
 	}
 }
+
+// /new starts a fresh session, keeps the chosen model, and /sessions marks the
+// chat's binding.
+func TestChannelNewAndSessions(t *testing.T) {
+	home := shortHome(t)
+	t.Setenv("PIG_HOME", home)
+	cfg := config.MockConfig(filepath.Join(home, "config.toml"))
+	cfg.Channel.Workdir = filepath.Join(home, "workdir")
+	cfg.Models = append(cfg.Models, config.Model{
+		Ref: "mock/second", Provider: "mock", Model: "mock",
+		ContextWindow: 64000, MaxOutput: 4096, Input: []string{"text"},
+	})
+	srv := startTestServer(t, cfg, config.Paths{Home: home})
+
+	ad := &slotAdapter{name: "fake", slots: 20}
+	srv.channels = []channel.Adapter{ad}
+	pairing := channel.NewPairing("fake")
+	srv.pairings["fake"] = pairing
+
+	in := make(chan channel.Inbound, 8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.consumeChannel(ctx, ad, in)
+
+	chat := channel.Inbound{Channel: "fake", ChatID: "chat-1", UserID: "u1", MessageID: "m1"}
+	pair := chat
+	pair.Text = "/pair " + pairing.Code()
+	in <- pair
+	ad.waitFor(t, "paired", 5*time.Second)
+
+	state, err := srv.Store().GetChannelState("fake", "chat-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := state.SessionID
+	if err := srv.Store().SetSessionModel(first, "mock/second"); err != nil {
+		t.Fatal(err)
+	}
+
+	newCmd := chat
+	newCmd.MessageID = "m2"
+	newCmd.Text = "/new"
+	in <- newCmd
+	ad.waitFor(t, "new session", 5*time.Second)
+
+	state, err = srv.Store().GetChannelState("fake", "chat-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.SessionID == first {
+		t.Fatalf("/new reused session %s", first)
+	}
+	fresh, err := srv.Store().GetSession(state.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Model != "mock/second" {
+		t.Fatalf("/new dropped the model: %q", fresh.Model)
+	}
+
+	list := chat
+	list.MessageID = "m3"
+	list.Text = "/sessions"
+	in <- list
+	out := ad.waitFor(t, "/resume <id>", 5*time.Second)
+	if !strings.Contains(out, "* "+fresh.ID) {
+		t.Fatalf("binding not marked: %q", out)
+	}
+	if !strings.Contains(out, first) {
+		t.Fatalf("previous session missing: %q", out)
+	}
+}

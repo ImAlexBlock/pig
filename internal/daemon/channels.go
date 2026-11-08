@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -478,14 +479,53 @@ func (s *Server) channelCommand(ctx context.Context, ad channel.Adapter, ib chan
 	case "/help":
 		s.sendText(ctx, ad, ib.ChatID, helpText(), ib.MessageID)
 	case "/new":
+		prevModel := ""
+		if cur, err := s.st.GetSession(state.SessionID); err == nil {
+			prevModel = cur.Model
+		}
 		sess, err := s.sessionForChat(ad.Name(), ib.ChatID)
 		if err != nil {
 			s.sendText(ctx, ad, ib.ChatID, "error: "+err.Error(), ib.MessageID)
 			return
 		}
+		// Keep the model the chat selected; only the context resets.
+		if prevModel != "" && prevModel != sess.Model {
+			if err := s.st.SetSessionModel(sess.ID, prevModel); err == nil {
+				sess.Model = prevModel
+			}
+		}
 		state.SessionID = sess.ID
 		_ = s.st.SetChannelState(state)
-		s.sendText(ctx, ad, ib.ChatID, "new session "+sess.ID, ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, fmt.Sprintf("new session %s (%s)", sess.ID, sess.Model), ib.MessageID)
+	case "/sessions":
+		limit := 10
+		if n, err := strconv.Atoi(rest); err == nil && n > 0 && n <= 50 {
+			limit = n
+		}
+		sessions, err := s.st.ListSessions(limit)
+		if err != nil {
+			s.sendText(ctx, ad, ib.ChatID, "error: "+err.Error(), ib.MessageID)
+			return
+		}
+		bound := state.SessionID
+		var lines []string
+		for _, sess := range sessions {
+			mark := " "
+			if sess.ID == bound {
+				mark = "*"
+			}
+			count := 0
+			if entries, err := s.st.AllEntries(sess.ID); err == nil {
+				count = len(entries)
+			}
+			lines = append(lines, fmt.Sprintf("%s %s  %d entries  %s", mark, sess.ID,
+				count, time.Unix(sess.UpdatedAt, 0).Format("01-02 15:04")))
+		}
+		if len(lines) == 0 {
+			s.sendText(ctx, ad, ib.ChatID, "no sessions", ib.MessageID)
+			return
+		}
+		s.sendText(ctx, ad, ib.ChatID, strings.Join(lines, "\n")+"\n\n/resume <id> to switch, /new to start fresh", ib.MessageID)
 	case "/resume":
 		if rest == "" {
 			s.sendText(ctx, ad, ib.ChatID, "usage: /resume <session-id>", ib.MessageID)
@@ -587,6 +627,7 @@ func (s *Server) channelStatus(sessionID string) string {
 func helpText() string {
 	return strings.Join([]string{
 		"/new — start a new session",
+		"/sessions [n] — recent sessions, * is this chat",
 		"/resume <id> — resume a session",
 		"/stop — cancel the running turn",
 		"/status — session, model, usage, jobs",

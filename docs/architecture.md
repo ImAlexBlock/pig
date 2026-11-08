@@ -394,8 +394,10 @@ is not bound may only send `/pair <code>`; wrong codes are limited to five
 attempts per minute, then the chat is ignored for ten minutes. A successful pair
 records `paired=1` and rotates the code.
 
-Commands: `/new`, `/resume <id>`, `/stop`, `/status`, `/compact`, `/model [ref]`,
-`/jobs`, `/help`.
+Commands: `/new`, `/sessions [n]`, `/resume <id>`, `/stop`, `/status`,
+`/compact`, `/model [ref]`, `/jobs`, `/help`. `/new` creates a session in the
+channel workdir and keeps the model the chat selected; `/sessions` lists recent
+sessions and marks the one bound to this chat.
 
 Rendering: markdown-capable channels get the raw text; others get rendered plain
 text.
