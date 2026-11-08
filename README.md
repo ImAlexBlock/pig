@@ -76,6 +76,7 @@ Channels are optional:
 | `internal/rtk` | bash output compression |
 | `internal/skill` | skill discovery and tool servers |
 | `internal/channel` | channel contract, pairing, rendering |
+| `internal/i18n` | reply catalogs: en, zh, zh-Hant |
 | `internal/daemon` | runtime, IPC methods, channels, scheduler |
 | `internal/tui` | Bubble Tea client |
 | `internal/ipc` | JSON-RPC framing over a Unix socket |

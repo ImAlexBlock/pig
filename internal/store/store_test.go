@@ -218,3 +218,52 @@ func TestChannelState(t *testing.T) {
 		t.Fatal("missing binding returned state")
 	}
 }
+
+// A version 1 database gains the channel_state.lang column on open and keeps
+// its existing rows.
+func TestMigrateV1ToV2(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pig.db")
+	st, err := Open(path, dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := st.DB().Exec(`ALTER TABLE channel_state DROP COLUMN lang`); err != nil {
+		t.Fatalf("drop lang: %v", err)
+	}
+	if _, err := st.DB().Exec(`UPDATE schema_meta SET version=1`); err != nil {
+		t.Fatalf("version: %v", err)
+	}
+	if _, err := st.DB().Exec(`INSERT INTO channel_state(channel,chat_id,session_id,paired,updated_at)
+		VALUES ('qq','u:1','s1',1,5)`); err != nil {
+		t.Fatalf("insert v1 row: %v", err)
+	}
+	st.Close()
+
+	up, err := Open(path, dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer up.Close()
+	var v int
+	if err := up.DB().QueryRow(`SELECT version FROM schema_meta`).Scan(&v); err != nil {
+		t.Fatalf("version: %v", err)
+	}
+	if v != SchemaVersion {
+		t.Fatalf("version = %d, want %d", v, SchemaVersion)
+	}
+	cs, err := up.GetChannelState("qq", "u:1")
+	if err != nil {
+		t.Fatalf("GetChannelState: %v", err)
+	}
+	if !cs.Paired || cs.SessionID != "s1" || cs.Lang != "" {
+		t.Fatalf("row = %+v", cs)
+	}
+	if err := up.SetChannelState(&ChannelState{Channel: "qq", ChatID: "u:1", SessionID: "s1", Paired: true, Lang: "zh-Hant"}); err != nil {
+		t.Fatalf("SetChannelState: %v", err)
+	}
+	again, err := up.GetChannelState("qq", "u:1")
+	if err != nil || again.Lang != "zh-Hant" {
+		t.Fatalf("lang = %q, %v", again.Lang, err)
+	}
+}

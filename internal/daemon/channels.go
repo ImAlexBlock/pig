@@ -13,6 +13,7 @@ import (
 	"github.com/alexblock/pig/internal/channel"
 	"github.com/alexblock/pig/internal/channel/qq"
 	"github.com/alexblock/pig/internal/channel/telegram"
+	"github.com/alexblock/pig/internal/i18n"
 	"github.com/alexblock/pig/internal/store"
 )
 
@@ -48,12 +49,13 @@ type chatProgress struct {
 	phase        string
 	ctxTokens    int
 	ctxWindow    int
+	lang         i18n.Lang
 	sentFirst    bool
 	statuses     int
 	lastStatusAt time.Time
 }
 
-func newChatProgress(ad channel.Adapter, chatID, replyTo string, ctxWindow int) *chatProgress {
+func newChatProgress(ad channel.Adapter, chatID, replyTo string, ctxWindow int, lang i18n.Lang) *chatProgress {
 	return &chatProgress{
 		adapter:   ad,
 		chatID:    chatID,
@@ -61,6 +63,7 @@ func newChatProgress(ad channel.Adapter, chatID, replyTo string, ctxWindow int) 
 		ch:        make(chan agent.Event, 256),
 		startedAt: time.Now(),
 		ctxWindow: ctxWindow,
+		lang:      i18n.Canonical(lang),
 	}
 }
 
@@ -125,14 +128,14 @@ func (p *chatProgress) statusLocked(elapsed time.Duration) string {
 		parts = append(parts, p.lastTool)
 	}
 	if p.steps > 0 {
-		parts = append(parts, fmt.Sprintf("%d tools", p.steps))
+		parts = append(parts, i18n.T(p.lang, i18n.KeyProgressTools, p.steps))
 	}
 	if p.ctxTokens > 0 {
 		ctx := shortTokens(p.ctxTokens)
 		if p.ctxWindow > 0 {
 			ctx += "/" + shortTokens(p.ctxWindow)
 		}
-		parts = append(parts, "ctx "+ctx)
+		parts = append(parts, i18n.T(p.lang, i18n.KeyProgressCtx, ctx))
 	}
 	if n := len(p.notices); n > 0 {
 		if last := strings.TrimSpace(p.notices[n-1]); last != "" {
@@ -244,7 +247,7 @@ func trimRunes(s string, n int) string {
 
 // budgetChunks limits an answer to the replies the chat can still receive and
 // marks where the rest went, instead of losing it to a failed send.
-func budgetChunks(ad channel.Adapter, chatID, replyTo, sessionID string, chunks []string) []string {
+func budgetChunks(ad channel.Adapter, chatID, replyTo, sessionID string, lang i18n.Lang, chunks []string) []string {
 	slots, ok := passiveSlots(ad, chatID, replyTo)
 	if !ok {
 		return chunks
@@ -257,7 +260,7 @@ func budgetChunks(ad channel.Adapter, chatID, replyTo, sessionID string, chunks 
 	}
 	out := chunks[:slots]
 	out[slots-1] = strings.TrimRight(out[slots-1], "\n") +
-		fmt.Sprintf("\n[… reply limit reached; full text: session://%s]", sessionID)
+		i18n.T(lang, i18n.KeyReplyLimit, sessionID)
 	return out
 }
 
@@ -392,6 +395,7 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, i
 	if err != nil {
 		state = &store.ChannelState{Channel: ad.Name(), ChatID: ib.ChatID}
 	}
+	lang := s.langOf(state)
 	if !state.Paired {
 		if code, ok := channel.PairCommand(ib.Text); ok {
 			p := s.pairings[ad.Name()]
@@ -399,27 +403,27 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, i
 				return
 			}
 			if good, reason := p.Verify(ib.ChatID, code); !good {
-				s.sendText(ctx, ad, ib.ChatID, "pairing failed: "+reason, ib.MessageID)
+				s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyPairingFailed, reason), ib.MessageID)
 				return
 			}
 			sess, cerr := s.sessionForChat(ad.Name(), ib.ChatID)
 			if cerr != nil {
-				s.sendText(ctx, ad, ib.ChatID, "error: "+cerr.Error(), ib.MessageID)
+				s.sendText(ctx, ad, ib.ChatID, errText(lang, cerr), ib.MessageID)
 				return
 			}
 			state.SessionID = sess.ID
 			state.Paired = true
 			_ = s.st.SetChannelState(state)
-			s.sendText(ctx, ad, ib.ChatID, "paired. send a message to start.", ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyPaired), ib.MessageID)
 			return
 		}
-		s.sendText(ctx, ad, ib.ChatID, "pairing required: /pair <code>", ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyPairingRequired), ib.MessageID)
 		return
 	}
 	if state.SessionID == "" {
 		sess, cerr := s.sessionForChat(ad.Name(), ib.ChatID)
 		if cerr != nil {
-			s.sendText(ctx, ad, ib.ChatID, "error: "+cerr.Error(), ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, errText(lang, cerr), ib.MessageID)
 			return
 		}
 		state.SessionID = sess.ID
@@ -434,13 +438,13 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, i
 	if err != nil {
 		sess, err = s.sessionForChat(ad.Name(), ib.ChatID)
 		if err != nil {
-			s.sendText(ctx, ad, ib.ChatID, "error: "+err.Error(), ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, errText(lang, err), ib.MessageID)
 			return
 		}
 		state.SessionID = sess.ID
 		_ = s.st.SetChannelState(state)
 	}
-	s.channelRun(ctx, ad, ib, sess, started)
+	s.channelRun(ctx, ad, ib, sess, lang, started)
 }
 
 func (s *Server) sessionForChat(channelName, chatID string) (*store.Session, error) {
@@ -475,13 +479,49 @@ func (s *Server) sendText(ctx context.Context, ad channel.Adapter, chatID, text,
 	}
 }
 
+// langOf resolves the reply language for a chat: the chat override, then the
+// config default, then English.
+func (s *Server) langOf(state *store.ChannelState) i18n.Lang {
+	if state != nil {
+		if l, ok := i18n.Parse(state.Lang); ok {
+			return l
+		}
+	}
+	if l, ok := i18n.Parse(s.cfg.Channel.Lang); ok {
+		return l
+	}
+	return i18n.EN
+}
+
+// errText renders "error: …" in the chat language.
+func errText(l i18n.Lang, err error) string {
+	return i18n.T(l, i18n.KeyError, err.Error())
+}
+
 func (s *Server) channelCommand(ctx context.Context, ad channel.Adapter, ib channel.Inbound, state *store.ChannelState) {
+	lang := s.langOf(state)
 	fields := strings.Fields(ib.Text)
 	cmd := strings.ToLower(fields[0])
 	rest := strings.TrimSpace(strings.TrimPrefix(ib.Text, fields[0]))
 	switch cmd {
 	case "/help":
-		s.sendText(ctx, ad, ib.ChatID, helpText(), ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyHelp), ib.MessageID)
+	case "/lang":
+		if rest == "" {
+			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyLangShow, lang.Label()), ib.MessageID)
+			return
+		}
+		next, ok := i18n.Parse(rest)
+		if !ok {
+			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyLangUnknown, rest), ib.MessageID)
+			return
+		}
+		state.Lang = string(next)
+		if err := s.st.SetChannelState(state); err != nil {
+			s.sendText(ctx, ad, ib.ChatID, errText(lang, err), ib.MessageID)
+			return
+		}
+		s.sendText(ctx, ad, ib.ChatID, i18n.T(next, i18n.KeyLangSet, next.Label()), ib.MessageID)
 	case "/new":
 		prevModel := ""
 		if cur, err := s.st.GetSession(state.SessionID); err == nil {
@@ -489,7 +529,7 @@ func (s *Server) channelCommand(ctx context.Context, ad channel.Adapter, ib chan
 		}
 		sess, err := s.sessionForChat(ad.Name(), ib.ChatID)
 		if err != nil {
-			s.sendText(ctx, ad, ib.ChatID, "error: "+err.Error(), ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, errText(lang, err), ib.MessageID)
 			return
 		}
 		// Keep the model the chat selected; only the context resets.
@@ -500,7 +540,7 @@ func (s *Server) channelCommand(ctx context.Context, ad channel.Adapter, ib chan
 		}
 		state.SessionID = sess.ID
 		_ = s.st.SetChannelState(state)
-		s.sendText(ctx, ad, ib.ChatID, fmt.Sprintf("new session %s (%s)", sess.ID, sess.Model), ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyNewSession, sess.ID, sess.Model), ib.MessageID)
 	case "/sessions":
 		limit := 10
 		if n, err := strconv.Atoi(rest); err == nil && n > 0 && n <= 50 {
@@ -508,7 +548,7 @@ func (s *Server) channelCommand(ctx context.Context, ad channel.Adapter, ib chan
 		}
 		sessions, err := s.st.ListSessions(limit)
 		if err != nil {
-			s.sendText(ctx, ad, ib.ChatID, "error: "+err.Error(), ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, errText(lang, err), ib.MessageID)
 			return
 		}
 		bound := state.SessionID
@@ -526,78 +566,78 @@ func (s *Server) channelCommand(ctx context.Context, ad channel.Adapter, ib chan
 				count, time.Unix(sess.UpdatedAt, 0).Format("01-02 15:04")))
 		}
 		if len(lines) == 0 {
-			s.sendText(ctx, ad, ib.ChatID, "no sessions", ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyNoSessions), ib.MessageID)
 			return
 		}
-		s.sendText(ctx, ad, ib.ChatID, strings.Join(lines, "\n")+"\n\n/resume <id> to switch, /new to start fresh", ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, strings.Join(lines, "\n")+"\n\n"+i18n.T(lang, i18n.KeySessionsHint), ib.MessageID)
 	case "/resume":
 		if rest == "" {
-			s.sendText(ctx, ad, ib.ChatID, "usage: /resume <session-id>", ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyResumeUsage), ib.MessageID)
 			return
 		}
 		if _, err := s.st.GetSession(rest); err != nil {
-			s.sendText(ctx, ad, ib.ChatID, "session not found: "+rest, ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeySessionNotFound, rest), ib.MessageID)
 			return
 		}
 		state.SessionID = rest
 		_ = s.st.SetChannelState(state)
-		s.sendText(ctx, ad, ib.ChatID, "resumed "+rest, ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyResumed, rest), ib.MessageID)
 	case "/stop":
 		dropped := s.ClearQueue(state.SessionID)
 		if runID, _, ok := s.ActiveRun(state.SessionID); ok {
 			_ = s.CancelRun(runID)
 			if dropped > 0 {
-				s.sendText(ctx, ad, ib.ChatID, fmt.Sprintf("stopping (dropped %d queued)", dropped), ib.MessageID)
+				s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyStoppingDropped, dropped), ib.MessageID)
 				return
 			}
-			s.sendText(ctx, ad, ib.ChatID, "stopping", ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyStopping), ib.MessageID)
 			return
 		}
 		if dropped > 0 {
-			s.sendText(ctx, ad, ib.ChatID, fmt.Sprintf("queue cleared (%d dropped)", dropped), ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyQueueCleared, dropped), ib.MessageID)
 			return
 		}
-		s.sendText(ctx, ad, ib.ChatID, "nothing running", ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyNothingRunning), ib.MessageID)
 	case "/status":
-		s.sendText(ctx, ad, ib.ChatID, s.channelStatus(state.SessionID), ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, s.channelStatus(state.SessionID, lang), ib.MessageID)
 	case "/compact":
 		sess, err := s.st.GetSession(state.SessionID)
 		if err != nil {
-			s.sendText(ctx, ad, ib.ChatID, "error: "+err.Error(), ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, errText(lang, err), ib.MessageID)
 			return
 		}
 		model, _ := s.cfg.Model(sess.Model)
 		res, cerr := s.comp.Compact(ctx, compactRequest(sess.ID, model))
 		if cerr != nil {
-			s.sendText(ctx, ad, ib.ChatID, "error: "+cerr.Error(), ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, errText(lang, cerr), ib.MessageID)
 			return
 		}
 		if !res.Compacted {
-			s.sendText(ctx, ad, ib.ChatID, "nothing to compact", ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyCompactNothing), ib.MessageID)
 			return
 		}
-		s.sendText(ctx, ad, ib.ChatID, fmt.Sprintf("compacted with %s: %d → %d tokens", res.Method, res.TokensBefore, res.TokensAfter), ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyCompacted, res.Method, res.TokensBefore, res.TokensAfter), ib.MessageID)
 	case "/model":
 		if rest == "" {
 			sess, _ := s.st.GetSession(state.SessionID)
 			if sess != nil {
-				s.sendText(ctx, ad, ib.ChatID, "model: "+sess.Model, ib.MessageID)
+				s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyModelShow, sess.Model), ib.MessageID)
 			}
 			return
 		}
 		if _, ok := s.cfg.Model(rest); !ok {
-			s.sendText(ctx, ad, ib.ChatID, "unknown model: "+rest, ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyModelUnknown, rest), ib.MessageID)
 			return
 		}
 		if err := s.st.SetSessionModel(state.SessionID, rest); err != nil {
-			s.sendText(ctx, ad, ib.ChatID, "error: "+err.Error(), ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, errText(lang, err), ib.MessageID)
 			return
 		}
-		s.sendText(ctx, ad, ib.ChatID, "model set to "+rest, ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyModelSet, rest), ib.MessageID)
 	case "/jobs":
 		jobs, _ := s.st.ListJobs("", 10)
 		if len(jobs) == 0 {
-			s.sendText(ctx, ad, ib.ChatID, "no jobs", ib.MessageID)
+			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyNoJobs), ib.MessageID)
 			return
 		}
 		var sb strings.Builder
@@ -606,14 +646,14 @@ func (s *Server) channelCommand(ctx context.Context, ad channel.Adapter, ib chan
 		}
 		s.sendText(ctx, ad, ib.ChatID, strings.TrimSpace(sb.String()), ib.MessageID)
 	default:
-		s.sendText(ctx, ad, ib.ChatID, "unknown command; /help for the list", ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyUnknownCommand), ib.MessageID)
 	}
 }
 
-func (s *Server) channelStatus(sessionID string) string {
+func (s *Server) channelStatus(sessionID string, lang i18n.Lang) string {
 	sess, err := s.st.GetSession(sessionID)
 	if err != nil {
-		return "session: unknown"
+		return i18n.T(lang, i18n.KeyStatusUnknown)
 	}
 	model, _ := s.cfg.Model(sess.Model)
 	totals, _ := s.st.SessionUsage(sessionID)
@@ -624,21 +664,11 @@ func (s *Server) channelStatus(sessionID string) string {
 			running++
 		}
 	}
-	return fmt.Sprintf("session: %s\nmodel: %s (window %d)\nusage: in %d out %d cost $%.4f\njobs running: %d",
-		sess.ID, sess.Model, model.ContextWindow, totals.Input, totals.Output, totals.CostUSD, running)
-}
-
-func helpText() string {
 	return strings.Join([]string{
-		"/new — start a new session",
-		"/sessions [n] — recent sessions, * is this chat",
-		"/resume <id> — resume a session",
-		"/stop — cancel the running turn",
-		"/status — session, model, usage, jobs",
-		"/compact — compact the context now",
-		"/model [ref] — show or set the model",
-		"/jobs — recent background jobs",
-		"/help — this list",
+		i18n.T(lang, i18n.KeyStatusSession, sess.ID),
+		i18n.T(lang, i18n.KeyStatusModel, sess.Model, model.ContextWindow),
+		i18n.T(lang, i18n.KeyStatusUsage, totals.Input, totals.Output, totals.CostUSD),
+		i18n.T(lang, i18n.KeyStatusJobs, running),
 	}, "\n")
 }
 
@@ -674,7 +704,7 @@ func (s *Server) saveInboundAttachments(sessionID string, attachments []channel.
 	return ids, strings.Join(lines, "\n")
 }
 
-func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.Inbound, sess *store.Session, started func()) {
+func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.Inbound, sess *store.Session, lang i18n.Lang, started func()) {
 	attachIDs, attachNote := s.saveInboundAttachments(sess.ID, ib.Attachments)
 	prompt := ib.Text
 	if attachNote != "" {
@@ -684,7 +714,7 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 	if m, ok := s.cfg.Model(sess.Model); ok {
 		ctxWindow = m.ContextWindow
 	}
-	p := newChatProgress(ad, ib.ChatID, ib.MessageID, ctxWindow)
+	p := newChatProgress(ad, ib.ChatID, ib.MessageID, ctxWindow, lang)
 	// Subscribe to the session first: a fast run may finish before we know its
 	// id, and losing run_end would strand the chat.
 	sub := s.fan.addSessionFunc(sess.ID, func(ev agent.Event) error {
@@ -708,14 +738,13 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 		started()
 	}
 	if err != nil {
-		s.sendText(ctx, ad, ib.ChatID, "error: "+err.Error(), ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, errText(lang, err), ib.MessageID)
 		return
 	}
 	if queued {
 		// Appended to the turn that is already running: acknowledge at once,
 		// then follow whichever run ends up carrying the input.
-		s.sendText(ctx, ad, ib.ChatID,
-			fmt.Sprintf("appended (#%d) · handled after the current step", s.QueueLen(sessionID)), ib.MessageID)
+		s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyAppended, s.QueueLen(sessionID)), ib.MessageID)
 		select {
 		case next := <-adopt:
 			if next == "" {
@@ -766,7 +795,7 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 			case agent.EvRunEnd:
 				final := pending
 				if final == "" && ev.Stop == "canceled" {
-					final = "⏳ stopped after " + shortDuration(time.Duration(ev.ElapsedMS)*time.Millisecond)
+					final = i18n.T(lang, i18n.KeyStoppedAfter, shortDuration(time.Duration(ev.ElapsedMS)*time.Millisecond))
 				}
 				if final == "" {
 					p.mu.Lock()
@@ -774,11 +803,11 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 					p.mu.Unlock()
 				}
 				if final == "" {
-					final = "(no output)"
+					final = i18n.T(lang, i18n.KeyNoOutput)
 				}
 				body, markdown := renderFor(ad, final)
 				chunks := channel.Split(body, ad.Caps().MaxChars)
-				chunks = budgetChunks(ad, ib.ChatID, ib.MessageID, sess.ID, chunks)
+				chunks = budgetChunks(ad, ib.ChatID, ib.MessageID, sess.ID, lang, chunks)
 				if len(chunks) == 0 {
 					s.logf("channel %s reply limit reached for %s; answer kept in session %s", ad.Name(), ib.MessageID, sess.ID)
 					return
@@ -823,12 +852,15 @@ func (s *Server) notifyChannel(j *store.Job) {
 	if ad == nil {
 		return
 	}
+	lang := i18n.EN
+	if st, err := s.st.GetChannelState(j.OriginChannel, j.OriginChat); err == nil {
+		lang = s.langOf(st)
+	}
 	var text string
 	if j.Status == store.JobDone {
-		summary := firstLineOf(j.Result, 300)
-		text = fmt.Sprintf("job %s done: %s", j.ID, summary)
+		text = i18n.T(lang, i18n.KeyJobDone, j.ID, firstLineOf(j.Result, 300))
 	} else {
-		text = fmt.Sprintf("job %s %s: %s", j.ID, j.Status, firstLineOf(j.Error, 300))
+		text = i18n.T(lang, i18n.KeyJobOther, j.ID, j.Status, firstLineOf(j.Error, 300))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

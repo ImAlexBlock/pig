@@ -1,6 +1,10 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/alexblock/pig/internal/i18n"
+)
 
 // KnownTools is the set of tool names the binary registers. tools.enabled must
 // be a subset of it.
@@ -115,6 +119,11 @@ func Validate(c *Config) error {
 	}
 	if c.Failover.MaxAttempts < 1 {
 		return errf("failover.max_attempts", "must be at least 1")
+	}
+
+	// Channel.
+	if _, ok := i18n.Parse(c.Channel.Lang); !ok && c.Channel.Lang != "" {
+		return errf("channel.lang", "unknown language %q (en, zh, zh-Hant)", c.Channel.Lang)
 	}
 
 	// Compaction.

@@ -169,6 +169,7 @@ type Search struct {
 
 type Channel struct {
 	Workdir  string          `toml:"workdir" json:"workdir"`
+	Lang     string          `toml:"lang" json:"lang"`
 	Telegram TelegramChannel `toml:"telegram" json:"telegram"`
 	QQ       QQChannel       `toml:"qq" json:"qq"`
 }
@@ -269,6 +270,7 @@ func Default() *Config {
 			FetchPages: 2,
 		},
 		Channel: Channel{
+			Lang:     "en",
 			Telegram: TelegramChannel{TokenEnv: "PIG_TELEGRAM_TOKEN"},
 			QQ: QQChannel{
 				AppSecretEnv: "PIG_QQ_APP_SECRET",

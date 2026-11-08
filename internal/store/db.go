@@ -14,8 +14,9 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-// SchemaVersion is the only supported store schema version.
-const SchemaVersion = 1
+// SchemaVersion is the current store schema version. Version 1 databases are
+// upgraded in place on open.
+const SchemaVersion = 2
 
 // ErrNotFound reports a missing row.
 var ErrNotFound = errors.New("not found")
@@ -171,6 +172,15 @@ func (s *Store) migrate() error {
 		return nil
 	case err != nil:
 		return fmt.Errorf("store: migration failed at version %d: %v", SchemaVersion, err)
+	case version == 1:
+		// v2 adds channel_state.lang: chat reply language.
+		if _, err := s.db.Exec(`ALTER TABLE channel_state ADD COLUMN lang TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("store: migration 1→2: %v", err)
+		}
+		if _, err := s.db.Exec(`UPDATE schema_meta SET version=?`, SchemaVersion); err != nil {
+			return fmt.Errorf("store: migration 1→2: %v", err)
+		}
+		return nil
 	case version != SchemaVersion:
 		return fmt.Errorf("store: migration failed at version %d: unsupported schema version %d", SchemaVersion, version)
 	}

@@ -194,16 +194,18 @@ type ChannelState struct {
 	ChatID    string `json:"chat_id"`
 	SessionID string `json:"session_id"`
 	Paired    bool   `json:"paired"`
+	// Lang is the reply language for this chat; empty follows the config.
+	Lang      string `json:"lang"`
 	UpdatedAt int64  `json:"updated_at"`
 }
 
 // GetChannelState loads the binding for (channel, chat).
 func (s *Store) GetChannelState(channel, chatID string) (*ChannelState, error) {
-	row := s.db.QueryRow(`SELECT channel,chat_id,session_id,paired,updated_at FROM channel_state
+	row := s.db.QueryRow(`SELECT channel,chat_id,session_id,paired,lang,updated_at FROM channel_state
 		WHERE channel=? AND chat_id=?`, channel, chatID)
 	var cs ChannelState
 	var paired int
-	err := row.Scan(&cs.Channel, &cs.ChatID, &cs.SessionID, &paired, &cs.UpdatedAt)
+	err := row.Scan(&cs.Channel, &cs.ChatID, &cs.SessionID, &paired, &cs.Lang, &cs.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: channel_state: %w", ErrNotFound)
 	}
@@ -216,11 +218,11 @@ func (s *Store) GetChannelState(channel, chatID string) (*ChannelState, error) {
 
 // SetChannelState upserts a chat binding.
 func (s *Store) SetChannelState(cs *ChannelState) error {
-	_, err := s.db.Exec(`INSERT INTO channel_state(channel,chat_id,session_id,paired,updated_at)
-		VALUES (?,?,?,?,?)
+	_, err := s.db.Exec(`INSERT INTO channel_state(channel,chat_id,session_id,paired,lang,updated_at)
+		VALUES (?,?,?,?,?,?)
 		ON CONFLICT(channel,chat_id) DO UPDATE SET session_id=excluded.session_id,
-		paired=excluded.paired,updated_at=excluded.updated_at`,
-		cs.Channel, cs.ChatID, cs.SessionID, boolInt(cs.Paired), now())
+		paired=excluded.paired,lang=excluded.lang,updated_at=excluded.updated_at`,
+		cs.Channel, cs.ChatID, cs.SessionID, boolInt(cs.Paired), cs.Lang, now())
 	if err != nil {
 		return fmt.Errorf("store: channel_state: %v", err)
 	}

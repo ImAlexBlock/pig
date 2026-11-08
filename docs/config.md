@@ -50,8 +50,7 @@ at `config.toml.bak`. `version` is read-only.
 | `[skills]` | search paths, python, timeouts |
 | `[browser]` | chrome path, headless, timeout |
 | `[search]` | providers, merge, results |
-| `[channel.*]` | workdir, telegram, qq |
-| `[memory]` | durable facts: enable, injection limit, cap |
+| `[channel.*]` | workdir, reply language, telegram, qq |
 | `[ui]` | theme, reasoning, progress interval |
 
 ## Validation rules
@@ -65,6 +64,7 @@ at `config.toml.bak`. `version` is read-only.
 - `tools.enabled` is a subset of the registered tools.
 - `subagents.max_depth` is `0` or `1`.
 - `background.max_running_jobs >= 1`.
+- `channel.lang` is empty or one of `en|zh|zh-Hant`.
 
 Unknown keys are reported on stderr and ignored. They never block startup.
 

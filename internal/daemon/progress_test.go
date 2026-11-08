@@ -11,6 +11,7 @@ import (
 	"github.com/alexblock/pig/internal/agent"
 	"github.com/alexblock/pig/internal/channel"
 	"github.com/alexblock/pig/internal/config"
+	"github.com/alexblock/pig/internal/i18n"
 	"github.com/alexblock/pig/internal/provider"
 	"github.com/alexblock/pig/internal/store"
 )
@@ -83,7 +84,7 @@ func (f *slotAdapter) messages() []string {
 
 func TestProgressStatusText(t *testing.T) {
 	ad := &fakeAdapter{name: "telegram"}
-	p := newChatProgress(ad, "c1", "m1", 1000000)
+	p := newChatProgress(ad, "c1", "m1", 1000000, i18n.EN)
 	p.observe(agent.Event{Type: agent.EvToolStart, ToolName: "bash"})
 	p.observe(agent.Event{Type: agent.EvToolEnd, ToolName: "bash"})
 	p.observe(agent.Event{Type: agent.EvToolEnd, ToolName: "read"})
@@ -126,7 +127,7 @@ func TestProgressDurations(t *testing.T) {
 // and must send at most one milestone afterwards.
 func TestProgressQQWaitsForWork(t *testing.T) {
 	ad := &slotAdapter{name: "qq", slots: 5}
-	p := newChatProgress(ad, "u:abc", "m1", 1000000)
+	p := newChatProgress(ad, "u:abc", "m1", 1000000, i18n.EN)
 	p.startedAt = time.Now().Add(-2 * time.Second)
 
 	if err := p.flush(context.Background()); err != nil {
@@ -196,7 +197,7 @@ func TestProgressQQWaitsForWork(t *testing.T) {
 // Below the slot floor no milestone is sent, so the answer keeps its replies.
 func TestProgressSkipsMilestoneWhenSlotsAreTight(t *testing.T) {
 	ad := &slotAdapter{name: "qq", slots: 2}
-	p := newChatProgress(ad, "u:abc", "m1", 1000000)
+	p := newChatProgress(ad, "u:abc", "m1", 1000000, i18n.EN)
 	p.mu.Lock()
 	p.startedAt = time.Now().Add(-2 * time.Minute)
 	p.sentFirst = true
@@ -215,7 +216,7 @@ func TestProgressSkipsMilestoneWhenSlotsAreTight(t *testing.T) {
 func TestBudgetChunks(t *testing.T) {
 	ad := &slotAdapter{name: "qq", slots: 2}
 	chunks := []string{"aaa", "bbb", "ccc", "ddd"}
-	got := budgetChunks(ad, "u:abc", "m1", "ses_1", chunks)
+	got := budgetChunks(ad, "c1", "m1", "ses_1", i18n.EN, chunks)
 	if len(got) != 2 {
 		t.Fatalf("want 2 chunks, got %v", got)
 	}
@@ -225,13 +226,13 @@ func TestBudgetChunks(t *testing.T) {
 
 	// Adapters without a slot limit keep every chunk.
 	free := &fakeAdapter{name: "telegram"}
-	if got := budgetChunks(free, "c1", "m1", "ses_1", chunks); len(got) != 4 {
+	if got := budgetChunks(free, "c1", "m1", "ses_1", i18n.EN, chunks); len(got) != 4 {
 		t.Fatalf("unexpected trimming: %v", got)
 	}
 
 	// No slots left means no send at all.
 	spent := &slotAdapter{name: "qq", slots: 0}
-	if got := budgetChunks(spent, "u:abc", "m1", "ses_1", chunks); len(got) != 0 {
+	if got := budgetChunks(spent, "u:abc", "m1", "ses_1", i18n.EN, chunks); len(got) != 0 {
 		t.Fatalf("want no chunks, got %v", got)
 	}
 }

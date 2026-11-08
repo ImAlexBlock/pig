@@ -395,9 +395,15 @@ attempts per minute, then the chat is ignored for ten minutes. A successful pair
 records `paired=1` and rotates the code.
 
 Commands: `/new`, `/sessions [n]`, `/resume <id>`, `/stop`, `/status`,
-`/compact`, `/model [ref]`, `/jobs`, `/help`. `/new` creates a session in the
-channel workdir and keeps the model the chat selected; `/sessions` lists recent
-sessions and marks the one bound to this chat.
+`/compact`, `/model [ref]`, `/jobs`, `/lang [en|zh|zh-Hant]`, `/help`. `/new`
+creates a session in the channel workdir and keeps the model the chat selected;
+`/sessions` lists recent sessions and marks the one bound to this chat.
+
+Replies are localized: `internal/i18n` holds one catalog per language, every key
+exists in all catalogs, and a test fails if a translation drops a formatting
+verb. The chat language is `channel_state.lang` (set by `/lang`), falling back to
+`channel.lang`, then English. Only human-facing text is translated; prompts sent
+to the model stay English.
 
 Rendering: markdown-capable channels get the raw text; others get rendered plain
 text.
@@ -593,6 +599,7 @@ what the five-passive-reply and chunking logic in the channel has to absorb.
 | `internal/rtk` | bash output compression |
 | `internal/skill` | skill discovery and JSON-RPC tool hosts |
 | `internal/channel` | channel contract, media types, pairing, rendering |
+| `internal/i18n` | reply catalogs and language resolution |
 | `internal/channel/telegram` | Telegram adapter |
 | `internal/channel/qq` | QQ adapter, token cache, gateway, media |
 | `internal/daemon` | runtime, IPC handlers, runs, fanout, channels, scheduler, log |
