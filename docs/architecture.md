@@ -290,6 +290,12 @@ best-speed. The glyph table is baked by `cmd/genfont` from Noto Sans Mono CJK SC
 
 ## Providers
 
+Model metadata comes from the entry when written and otherwise from a built-in
+table keyed on the standard model name (`internal/config/modelmeta.go`), so a
+relay entry only needs its base URL, key and model id. `pig models show` reports
+the resolved values next to the catalog hint, and `pig models set` overrides a
+single field.
+
 Four wire adapters behind one interface:
 
 | Kind | Endpoint | Notes |
@@ -402,7 +408,7 @@ drops inputs queued behind it, and the run ends with `⏳ stopped after <elapsed
 Progress is one status line, rendered from the run events:
 
 ```
-⏳ 1m32s · Build · bash · 7 tools · ctx 48.3k · compacted with shake
+⏳ 1m32s · Build · bash · 7 tools · ctx 48.3k/1m · compacted with shake
 ```
 
 | Channel | Behaviour |

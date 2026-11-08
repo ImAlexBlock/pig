@@ -46,18 +46,20 @@ type chatProgress struct {
 	lastTool     string
 	phase        string
 	ctxTokens    int
+	ctxWindow    int
 	sentFirst    bool
 	statuses     int
 	lastStatusAt time.Time
 }
 
-func newChatProgress(ad channel.Adapter, chatID, replyTo string) *chatProgress {
+func newChatProgress(ad channel.Adapter, chatID, replyTo string, ctxWindow int) *chatProgress {
 	return &chatProgress{
 		adapter:   ad,
 		chatID:    chatID,
 		replyTo:   replyTo,
 		ch:        make(chan agent.Event, 256),
 		startedAt: time.Now(),
+		ctxWindow: ctxWindow,
 	}
 }
 
@@ -125,7 +127,11 @@ func (p *chatProgress) statusLocked(elapsed time.Duration) string {
 		parts = append(parts, fmt.Sprintf("%d tools", p.steps))
 	}
 	if p.ctxTokens > 0 {
-		parts = append(parts, "ctx "+shortTokens(p.ctxTokens))
+		ctx := shortTokens(p.ctxTokens)
+		if p.ctxWindow > 0 {
+			ctx += "/" + shortTokens(p.ctxWindow)
+		}
+		parts = append(parts, "ctx "+ctx)
 	}
 	if n := len(p.notices); n > 0 {
 		if last := strings.TrimSpace(p.notices[n-1]); last != "" {
@@ -223,7 +229,7 @@ func shortTokens(n int) string {
 	case n < 1000000:
 		return fmt.Sprintf("%.0fk", float64(n)/1000)
 	default:
-		return fmt.Sprintf("%.1fM", float64(n)/1000000)
+		return fmt.Sprintf("%.1fm", float64(n)/1000000)
 	}
 }
 
@@ -629,7 +635,11 @@ func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.
 	if attachNote != "" {
 		prompt = strings.TrimSpace(prompt + "\n\n" + attachNote)
 	}
-	p := newChatProgress(ad, ib.ChatID, ib.MessageID)
+	ctxWindow := 0
+	if m, ok := s.cfg.Model(sess.Model); ok {
+		ctxWindow = m.ContextWindow
+	}
+	p := newChatProgress(ad, ib.ChatID, ib.MessageID, ctxWindow)
 	// Subscribe to the session first: a fast run may finish before we know its
 	// id, and losing run_end would strand the chat.
 	sub := s.fan.addSessionFunc(sess.ID, func(ev agent.Event) error {

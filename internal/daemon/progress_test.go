@@ -83,7 +83,7 @@ func (f *slotAdapter) messages() []string {
 
 func TestProgressStatusText(t *testing.T) {
 	ad := &fakeAdapter{name: "telegram"}
-	p := newChatProgress(ad, "c1", "m1")
+	p := newChatProgress(ad, "c1", "m1", 1000000)
 	p.observe(agent.Event{Type: agent.EvToolStart, ToolName: "bash"})
 	p.observe(agent.Event{Type: agent.EvToolEnd, ToolName: "bash"})
 	p.observe(agent.Event{Type: agent.EvToolEnd, ToolName: "read"})
@@ -93,7 +93,7 @@ func TestProgressStatusText(t *testing.T) {
 	p.observe(agent.Event{Type: agent.EvUsage, Usage: &provider.Usage{Input: 48300}})
 
 	got := p.statusLocked(42 * time.Second)
-	for _, want := range []string{"⏳ 42s", "Build", "read", "2 tools", "ctx 48.3k"} {
+	for _, want := range []string{"⏳ 42s", "Build", "read", "2 tools", "ctx 48.3k/1.0m"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status %q missing %q", got, want)
 		}
@@ -117,13 +117,16 @@ func TestProgressDurations(t *testing.T) {
 	if got := shortTokens(132000); got != "132k" {
 		t.Errorf("shortTokens(132000) = %q", got)
 	}
+	if got := shortTokens(1000000); got != "1.0m" {
+		t.Errorf("shortTokens(1000000) = %q", got)
+	}
 }
 
 // A channel without editing must not spend a passive reply on an empty status,
 // and must send at most one milestone afterwards.
 func TestProgressQQWaitsForWork(t *testing.T) {
 	ad := &slotAdapter{name: "qq", slots: 5}
-	p := newChatProgress(ad, "u:abc", "m1")
+	p := newChatProgress(ad, "u:abc", "m1", 1000000)
 	p.startedAt = time.Now().Add(-2 * time.Second)
 
 	if err := p.flush(context.Background()); err != nil {
@@ -193,7 +196,7 @@ func TestProgressQQWaitsForWork(t *testing.T) {
 // Below the slot floor no milestone is sent, so the answer keeps its replies.
 func TestProgressSkipsMilestoneWhenSlotsAreTight(t *testing.T) {
 	ad := &slotAdapter{name: "qq", slots: 2}
-	p := newChatProgress(ad, "u:abc", "m1")
+	p := newChatProgress(ad, "u:abc", "m1", 1000000)
 	p.mu.Lock()
 	p.startedAt = time.Now().Add(-2 * time.Minute)
 	p.sentFirst = true

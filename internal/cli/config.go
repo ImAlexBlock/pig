@@ -207,7 +207,7 @@ func (a *App) cmdAuth(args []string) (int, error) {
 func (a *App) cmdModels(args []string) (int, error) {
 	path := a.Paths.Config()
 	if len(args) == 0 {
-		return ExitUsage, usagef("usage: pig models add|list|rm")
+		return ExitUsage, usagef("usage: pig models add|list|show|set|rm")
 	}
 	switch args[0] {
 	case "add":
@@ -225,8 +225,23 @@ func (a *App) cmdModels(args []string) (int, error) {
 		if err := fs.Parse(args[1:]); err != nil {
 			return ExitUsage, usagef("%v", err)
 		}
-		if provider == "" || model == "" || ctxWindow <= 0 || maxOut <= 0 {
-			return ExitUsage, usagef("models add: --provider, --model, --context-window and --max-output are required")
+		if provider == "" || model == "" {
+			return ExitUsage, usagef("models add: --provider and --model are required")
+		}
+		// Metadata known for the standard model name fills the gaps, so a relay
+		// only needs its base URL, key and the model id.
+		meta, known := config.LookupModelMeta(model)
+		if ctxWindow <= 0 {
+			ctxWindow = meta.ContextWindow
+		}
+		if maxOut <= 0 {
+			maxOut = meta.MaxOutput
+		}
+		if input == "" && known {
+			input = strings.Join(meta.Input, ",")
+		}
+		if ctxWindow <= 0 || maxOut <= 0 {
+			return ExitUsage, usagef("models add: unknown model %q; pass --context-window and --max-output", model)
 		}
 		inputs := strings.Split(input, ",")
 		for i := range inputs {
@@ -261,8 +276,62 @@ func (a *App) cmdModels(args []string) (int, error) {
 			return ExitOK, nil
 		}
 		for _, m := range cfg.Models {
-			fmt.Fprintf(a.Out, "%s\t%s/%s\t%d\t%d\n", m.Ref, m.Provider, m.Model, m.ContextWindow, m.MaxOutput)
+			fmt.Fprintf(a.Out, "%s\t%s/%s\t%d\t%d\t%s\n", m.Ref, m.Provider, m.Model, m.ContextWindow, m.MaxOutput, strings.Join(m.Input, "+"))
 		}
+		return ExitOK, nil
+	case "show":
+		if len(args) < 2 {
+			return ExitUsage, usagef("usage: pig models show <ref>")
+		}
+		cfg, err := config.Load(path)
+		if err != nil {
+			return ExitConfig, err
+		}
+		m, ok := cfg.Model(args[1])
+		if !ok {
+			return ExitConfig, fmt.Errorf("models: unknown ref %q", args[1])
+		}
+		if a.JSON {
+			a.printJSON(m)
+			return ExitOK, nil
+		}
+		fmt.Fprintf(a.Out, "ref           %s\n", m.Ref)
+		fmt.Fprintf(a.Out, "provider      %s\n", m.Provider)
+		fmt.Fprintf(a.Out, "model         %s\n", m.Model)
+		fmt.Fprintf(a.Out, "context       %d\n", m.ContextWindow)
+		fmt.Fprintf(a.Out, "max_output    %d\n", m.MaxOutput)
+		fmt.Fprintf(a.Out, "input         %s\n", strings.Join(m.Input, ","))
+		fmt.Fprintf(a.Out, "cache_ttl     %ds\n", m.Cache.TTLSeconds)
+		fmt.Fprintf(a.Out, "cost          in=%.3f out=%.3f read=%.3f write=%.3f\n", m.Cost.Input, m.Cost.Output, m.Cost.CacheRead, m.Cost.CacheWrite)
+		if meta, known := m.MetaFromCatalog(); known {
+			fmt.Fprintf(a.Out, "catalog hint  %d ctx / %d out (%s)\n", meta.ContextWindow, meta.MaxOutput, strings.Join(meta.Input, "+"))
+		} else {
+			fmt.Fprintf(a.Out, "catalog hint  unknown\n")
+		}
+		return ExitOK, nil
+	case "set":
+		if len(args) < 4 {
+			return ExitUsage, usagef("usage: pig models set <ref> <field> <value>")
+		}
+		cfg, err := config.Load(path)
+		if err != nil {
+			return ExitConfig, err
+		}
+		idx := -1
+		for i, m := range cfg.Models {
+			if m.Ref == args[1] {
+				idx = i
+			}
+		}
+		if idx < 0 {
+			return ExitConfig, fmt.Errorf("models: unknown ref %q", args[1])
+		}
+		key := fmt.Sprintf("models.%d.%s", idx, args[2])
+		value, err := config.Set(path, key, strings.Join(args[3:], " "))
+		if err != nil {
+			return ExitConfig, err
+		}
+		fmt.Fprintf(a.Out, "set %s = %s\n", key, describeValue(value))
 		return ExitOK, nil
 	case "rm":
 		if len(args) < 2 {
@@ -275,4 +344,16 @@ func (a *App) cmdModels(args []string) (int, error) {
 		return ExitOK, nil
 	}
 	return ExitUsage, usagef("unknown models action %q", args[0])
+}
+
+// describeValue renders a value returned by config.Set for humans.
+func describeValue(v any) string {
+	if list, ok := v.([]any); ok {
+		parts := make([]string, len(list))
+		for i, e := range list {
+			parts[i] = fmt.Sprint(e)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	}
+	return fmt.Sprint(v)
 }

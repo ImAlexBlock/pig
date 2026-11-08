@@ -98,3 +98,39 @@ pig auth rm ANTHROPIC_API_KEY
 
 At startup pig loads the file into the environment. Existing process variables
 win. Loaded values are redacted as `***` in logs and tool output.
+
+## Model metadata
+
+A model needs a context window, an output ceiling and its modalities. Writing
+them by hand for every relay is noise, so a built-in table fills what the entry
+leaves out, keyed on the **standard model name**:
+
+```toml
+[[models]]
+ref = "relay/gpt-4.1"      # ref is just a label
+provider = "relay"
+model = "gpt-4.1"          # the standard name resolves the metadata
+# context_window = 1000000 # filled from the table
+# max_output     = 32768   # filled from the table
+# input          = ["text","image"]
+```
+
+Explicit values always win. An unknown model without `context_window` and
+`max_output` is rejected instead of guessed.
+
+Known families: `claude-sonnet-4`, `claude-opus-4`, `claude-3-7-sonnet`,
+`claude-3-5-sonnet`, `claude-3-5-haiku`, `gpt-5`, `gpt-4.1`, `gpt-4o`, `o3`,
+`o4-mini`, `deepseek-v4`, `deepseek-reasoner`, `deepseek-v3`, `deepseek-chat`,
+`gemini-2.5-pro`, `gemini-2.5-flash`, `qwen3`, `kimi-k2`. Matching is a
+case-insensitive prefix on the bare model id, so `claude-sonnet-4-5-20250929`
+resolves to the sonnet family.
+
+Inspect and correct it per model:
+
+```
+pig models list                     # ref, provider/model, window, max out, input
+pig models show relay/gpt-4.1       # resolved values plus the catalog hint
+pig models set relay/gpt-4.1 context_window 400000
+pig models set relay/gpt-4.1 input '["text","image"]'
+pig models add --provider relay --model deepseek-chat   # dimensions optional
+```

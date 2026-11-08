@@ -39,6 +39,7 @@ func Parse(b []byte, path string) (*Config, error) {
 	}
 	cfg.Unknown = unknownKeys(raw, reflect.TypeOf(Config{}), "")
 	cfg.Path = path
+	cfg.applyModelMeta()
 	if err := Validate(cfg); err != nil {
 		return nil, err
 	}
