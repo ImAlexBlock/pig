@@ -9,6 +9,7 @@ import (
 
 	"github.com/alexblock/pig/internal/channel"
 	"github.com/alexblock/pig/internal/config"
+	"github.com/alexblock/pig/internal/store"
 )
 
 // newLangServer starts a daemon with one fake channel and a paired chat.
@@ -112,5 +113,56 @@ func TestChannelLangConfigDefault(t *testing.T) {
 	got := ad.waitFor(t, "会话：", 5*time.Second)
 	if !strings.Contains(got, "模型：") {
 		t.Fatalf("status not translated: %q", got)
+	}
+}
+
+// run.start carries attachment artifact ids into the user turn, which is what
+// lets a vision model see an inbound image.
+func TestRunStartRecordsAttachments(t *testing.T) {
+	t.Setenv("PIG_MOCK_SCRIPT", `{"turns":[{"text":"ok"}]}`)
+	home := shortHome(t)
+	t.Setenv("PIG_HOME", home)
+	cfg := config.MockConfig(filepath.Join(home, "config.toml"))
+	srv := startTestServer(t, cfg, config.Paths{Home: home})
+
+	sess, err := srv.createSession(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, err := srv.Store().PutArtifact(sess.ID, "image/png", []byte("\x89PNG\r\n\x1a\nfake"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, _, err := srv.StartRun(runSpec{
+		SessionID:   sess.ID,
+		Prompt:      "what is in the picture",
+		Attachments: []string{art.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if _, _, ok := srv.ActiveRun(sess.ID); !ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("run did not finish")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	entries, err := srv.Store().AllEntries(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range entries {
+		if e.Kind == store.KindMessage && e.Role == "user" {
+			got = e.Message().Attachments
+		}
+	}
+	if len(got) != 1 || got[0] != art.ID {
+		t.Fatalf("attachments = %v, want [%s]", got, art.ID)
 	}
 }
