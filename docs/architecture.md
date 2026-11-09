@@ -233,6 +233,11 @@ Details that matter:
 - The **system prompt is built once per run**. It contains no cwd, no todo list
   and no tool output, because a byte-identical prefix is what keeps provider
   prompt caches warm. Volatile state travels in messages.
+- `internal/prompt/system.md` fixes the section order: voice, reasoning shape,
+  engineering rules, then tools, URIs, skills, configuration, run discipline,
+  remembered facts, and context files last. The voice and engineering rules come
+  from omp's prompt plus ASD-STE100 plain-language rules: answer first, one idea
+  per sentence, active voice, no filler, mark unverified claims.
 - Tool results are persisted one by one. Oversized results spill to an artifact:
   head 8192 bytes, tail 2048 bytes, UTF-8 aligned, with a `[truncated …]` line.
 - Tool panic becomes `tool panicked: <value>` and the loop continues.
@@ -561,6 +566,7 @@ published unit prices:
 | after loop and tool fixes | 51/61 = 83.6% | $0.135 | 23.0 s | 16,080 | 75.0% |
 | after cache-stable prompt | 51/61 = 83.6% | $0.084 | 19.1 s | 14,347 | 89.7% |
 | final, mean of three runs | 49.7/61 = 81.4% | $0.087 | 20.3 s | 14,355 | 89.2% |
+| after plain-voice prompt | 51/61 = 83.6% | $0.083 | 17.7 s | 13,360 | 88.4% |
 | reference harness `omp` | 50/61 = 82.0% | $0.125 | 9.4 s | 67,695 | 97.0% |
 
 Single-run scores swing by ±2.5 points on this suite, so the two harnesses are
