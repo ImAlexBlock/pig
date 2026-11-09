@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 func sseServer(t *testing.T, status int, body string) *httptest.Server {

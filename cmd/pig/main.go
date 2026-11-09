@@ -4,7 +4,7 @@ package main
 import (
 	"os"
 
-	"github.com/alexblock/pig/internal/cli"
+	"github.com/ImAlexBlock/pig/internal/cli"
 )
 
 func main() {

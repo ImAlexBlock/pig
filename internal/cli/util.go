@@ -3,7 +3,7 @@ package cli
 import (
 	"os"
 
-	"github.com/alexblock/pig/internal/rtk"
+	"github.com/ImAlexBlock/pig/internal/rtk"
 )
 
 func ensureDir(dir string) error {

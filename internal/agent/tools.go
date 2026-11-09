@@ -7,10 +7,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/provider"
-	"github.com/alexblock/pig/internal/store"
-	"github.com/alexblock/pig/internal/tool"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/provider"
+	"github.com/ImAlexBlock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/tool"
 )
 
 // runToolBatch executes one tool batch and persists every result.

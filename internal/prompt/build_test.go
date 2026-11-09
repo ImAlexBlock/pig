@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 func buildTest(t *testing.T, cwd string, cfg *config.Config) string {

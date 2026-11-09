@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/alexblock/pig/internal/channel"
+	"github.com/ImAlexBlock/pig/internal/channel"
 )
 
 // Adapter talks to the Telegram Bot API.

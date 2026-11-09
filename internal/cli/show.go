@@ -3,8 +3,8 @@ package cli
 import (
 	"fmt"
 
-	"github.com/alexblock/pig/internal/internalurl"
-	"github.com/alexblock/pig/internal/skill"
+	"github.com/ImAlexBlock/pig/internal/internalurl"
+	"github.com/ImAlexBlock/pig/internal/skill"
 )
 
 func (a *App) cmdShow(args []string) (int, error) {

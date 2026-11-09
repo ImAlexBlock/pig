@@ -3,7 +3,7 @@ package compact
 import (
 	"fmt"
 
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 // Shake constants: only tool results larger than ShakeMinEntryTokens are

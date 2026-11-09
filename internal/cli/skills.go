@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/alexblock/pig/internal/skill"
+	"github.com/ImAlexBlock/pig/internal/skill"
 )
 
 func (a *App) cmdSkills(args []string) (int, error) {

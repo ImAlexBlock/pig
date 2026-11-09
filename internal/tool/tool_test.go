@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/internalurl"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/internalurl"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 func testEnv(t *testing.T) (*Env, string) {

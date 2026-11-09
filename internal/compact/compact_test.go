@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/provider"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/provider"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 func newStore(t *testing.T) (*store.Store, string) {

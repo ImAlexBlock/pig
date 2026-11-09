@@ -11,10 +11,10 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/alexblock/pig/internal/agent"
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/ipc"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/agent"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/ipc"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 // Options configures the TUI.

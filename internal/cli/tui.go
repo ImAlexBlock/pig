@@ -5,8 +5,8 @@ import (
 	"flag"
 	"io"
 
-	"github.com/alexblock/pig/internal/store"
-	"github.com/alexblock/pig/internal/tui"
+	"github.com/ImAlexBlock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/tui"
 )
 
 func (a *App) cmdTUI(args []string) (int, error) {

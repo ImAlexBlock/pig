@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/alexblock/pig/docs"
+	"github.com/ImAlexBlock/pig/docs"
 )
 
 func (a *App) cmdDocs(args []string) (int, error) {

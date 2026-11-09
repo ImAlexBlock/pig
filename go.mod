@@ -1,4 +1,4 @@
-module github.com/alexblock/pig
+module github.com/ImAlexBlock/pig
 
 go 1.27.1
 

@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 
-	"github.com/alexblock/pig/internal/i18n"
+	"github.com/ImAlexBlock/pig/internal/i18n"
 )
 
 // KnownTools is the set of tool names the binary registers. tools.enabled must

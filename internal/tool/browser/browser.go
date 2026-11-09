@@ -20,8 +20,8 @@ import (
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/tool"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/tool"
 )
 
 const browserSchema = `{

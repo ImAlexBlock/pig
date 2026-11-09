@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 const todoSchema = `{

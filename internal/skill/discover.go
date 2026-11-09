@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/alexblock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/config"
 )
 
 // ToolDef is one tool declared by a skill manifest.

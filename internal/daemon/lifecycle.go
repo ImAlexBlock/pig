@@ -15,8 +15,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/ipc"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/ipc"
 )
 
 // Version is the reported binary version.

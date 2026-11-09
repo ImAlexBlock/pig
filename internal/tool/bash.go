@@ -13,7 +13,7 @@ import (
 
 	"encoding/json"
 
-	"github.com/alexblock/pig/internal/rtk"
+	"github.com/ImAlexBlock/pig/internal/rtk"
 )
 
 const bashSchema = `{

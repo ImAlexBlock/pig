@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/tool"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/tool"
 )
 
 func testTool(t *testing.T) (*Tool, *tool.Env) {

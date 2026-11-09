@@ -1,8 +1,8 @@
 package agent
 
 import (
-	"github.com/alexblock/pig/internal/provider"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/provider"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 // Run event types shared by the TUI, the CLI client and channels.

@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/alexblock/pig/internal/agent"
-	"github.com/alexblock/pig/internal/compact"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/agent"
+	"github.com/ImAlexBlock/pig/internal/compact"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 // continuationPrompt is appended to the forked child session.

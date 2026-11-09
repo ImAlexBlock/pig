@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/alexblock/pig/internal/compact"
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/compact"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 //go:embed system.md

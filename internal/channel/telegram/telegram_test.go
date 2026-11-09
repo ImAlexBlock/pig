@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexblock/pig/internal/channel"
+	"github.com/ImAlexBlock/pig/internal/channel"
 )
 
 func newTestAdapter(t *testing.T, handler func(method string, body map[string]any) any) (*Adapter, *[]string) {

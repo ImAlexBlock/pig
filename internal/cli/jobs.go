@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 func (a *App) cmdJobs(args []string) (int, error) {

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexblock/pig/internal/channel"
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/channel"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 type fakeAdapter struct {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 const jobSchema = `{

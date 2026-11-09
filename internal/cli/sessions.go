@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/alexblock/pig/internal/internalurl"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/internalurl"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 func (a *App) cmdSessions(args []string) (int, error) {

@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alexblock/pig/internal/agent"
-	"github.com/alexblock/pig/internal/channel"
-	"github.com/alexblock/pig/internal/channel/qq"
-	"github.com/alexblock/pig/internal/channel/telegram"
-	"github.com/alexblock/pig/internal/i18n"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/agent"
+	"github.com/ImAlexBlock/pig/internal/channel"
+	"github.com/ImAlexBlock/pig/internal/channel/qq"
+	"github.com/ImAlexBlock/pig/internal/channel/telegram"
+	"github.com/ImAlexBlock/pig/internal/i18n"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 const (

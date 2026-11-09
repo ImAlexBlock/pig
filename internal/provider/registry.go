@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/alexblock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/config"
 )
 
 // Registry builds wire clients from configuration.

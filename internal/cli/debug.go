@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alexblock/pig/internal/compact/snapcompact"
+	"github.com/ImAlexBlock/pig/internal/compact/snapcompact"
 )
 
 func (a *App) cmdDebug(args []string) (int, error) {

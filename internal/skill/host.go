@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/tool"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/tool"
 )
 
 const stderrKeep = 8192

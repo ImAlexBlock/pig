@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alexblock/pig/internal/provider"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/provider"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 // LLMSummaryTimeout bounds one summarisation request.

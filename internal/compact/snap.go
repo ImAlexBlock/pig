@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alexblock/pig/internal/compact/snapcompact"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/compact/snapcompact"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 // SnapSummarizeTimeout bounds the optional LLM summary that labels the archive.

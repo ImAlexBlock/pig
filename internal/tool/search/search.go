@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/tool"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/tool"
 )
 
 const searchSchema = `{

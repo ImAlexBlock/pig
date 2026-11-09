@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alexblock/pig/internal/agent"
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/internalurl"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/agent"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/internalurl"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 // Runner executes one job.

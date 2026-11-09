@@ -8,9 +8,9 @@ import (
 	"io"
 	"strings"
 
-	"github.com/alexblock/pig/internal/agent"
-	"github.com/alexblock/pig/internal/ipc"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/agent"
+	"github.com/ImAlexBlock/pig/internal/ipc"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 func (a *App) cmdRun(args []string) (int, error) {

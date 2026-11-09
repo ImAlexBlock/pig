@@ -3,8 +3,8 @@ package daemon
 import (
 	"sync"
 
-	"github.com/alexblock/pig/internal/agent"
-	"github.com/alexblock/pig/internal/ipc"
+	"github.com/ImAlexBlock/pig/internal/agent"
+	"github.com/ImAlexBlock/pig/internal/ipc"
 )
 
 // subscriber is one event stream consumer.

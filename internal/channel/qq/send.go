@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alexblock/pig/internal/channel"
+	"github.com/ImAlexBlock/pig/internal/channel"
 )
 
 func newRequest(ctx context.Context, method, url string, body []byte, token string) (*http.Request, error) {

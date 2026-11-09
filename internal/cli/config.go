@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/alexblock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/config"
 )
 
 func (a *App) cmdConfig(args []string) (int, error) {

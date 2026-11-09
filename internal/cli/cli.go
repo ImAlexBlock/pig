@@ -12,10 +12,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/daemon"
-	"github.com/alexblock/pig/internal/ipc"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/daemon"
+	"github.com/ImAlexBlock/pig/internal/ipc"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 // Exit codes.

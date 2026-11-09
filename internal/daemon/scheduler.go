@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/alexblock/pig/internal/compact"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/compact"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 // idleFor reports whether the daemon has been idle long enough to exit.

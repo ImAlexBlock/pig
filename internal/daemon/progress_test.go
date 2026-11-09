@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexblock/pig/internal/agent"
-	"github.com/alexblock/pig/internal/channel"
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/i18n"
-	"github.com/alexblock/pig/internal/provider"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/agent"
+	"github.com/ImAlexBlock/pig/internal/channel"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/i18n"
+	"github.com/ImAlexBlock/pig/internal/provider"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 // slotAdapter is a channel that cannot edit messages and reports a fixed number

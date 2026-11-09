@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/alexblock/pig/internal/compact"
-	"github.com/alexblock/pig/internal/store"
-	"github.com/alexblock/pig/internal/tool"
+	"github.com/ImAlexBlock/pig/internal/compact"
+	"github.com/ImAlexBlock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/tool"
 )
 
 func (a *Agent) spawnHook() func(ctx context.Context, req tool.SubagentRequest) (tool.SubagentResult, error) {

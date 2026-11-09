@@ -8,8 +8,8 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/alexblock/pig/internal/config"
-	"github.com/alexblock/pig/internal/daemon"
+	"github.com/ImAlexBlock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/daemon"
 )
 
 func (a *App) cmdDoctor(args []string) (int, error) {

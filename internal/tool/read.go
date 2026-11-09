@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alexblock/pig/internal/internalurl"
+	"github.com/ImAlexBlock/pig/internal/internalurl"
 )
 
 const readSchema = `{

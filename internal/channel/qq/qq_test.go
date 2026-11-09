@@ -10,8 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/alexblock/pig/internal/channel"
-	"github.com/alexblock/pig/internal/config"
+	"github.com/ImAlexBlock/pig/internal/channel"
+	"github.com/ImAlexBlock/pig/internal/config"
 )
 
 func TestTokenFetchAndCache(t *testing.T) {

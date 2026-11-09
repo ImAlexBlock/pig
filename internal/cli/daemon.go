@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/alexblock/pig/internal/daemon"
+	"github.com/ImAlexBlock/pig/internal/daemon"
 )
 
 func (a *App) cmdDaemon(args []string) (int, error) {

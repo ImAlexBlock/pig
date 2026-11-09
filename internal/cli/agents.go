@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/alexblock/pig/internal/internalurl"
-	"github.com/alexblock/pig/internal/store"
+	"github.com/ImAlexBlock/pig/internal/internalurl"
+	"github.com/ImAlexBlock/pig/internal/store"
 )
 
 func (a *App) cmdAgents(args []string) (int, error) {

@@ -7,7 +7,7 @@ import (
 	"image/png"
 	"strings"
 
-	"github.com/alexblock/pig/internal/rtk"
+	"github.com/ImAlexBlock/pig/internal/rtk"
 )
 
 // Layout constants.
