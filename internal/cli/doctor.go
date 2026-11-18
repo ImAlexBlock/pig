@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"syscall"
 
 	"github.com/ImAlexBlock/pig/internal/config"
 	"github.com/ImAlexBlock/pig/internal/daemon"
@@ -58,6 +60,20 @@ func (a *App) cmdDoctor(args []string) (int, error) {
 		add("store", false, err.Error())
 	} else {
 		add("store", true, a.Paths.DB())
+		var integrity string
+		if err := st.DB().QueryRow(`PRAGMA quick_check`).Scan(&integrity); err != nil {
+			add("store.integrity", false, err.Error())
+		} else {
+			add("store.integrity", integrity == "ok", integrity)
+		}
+		if size, n, err := artifactUsage(a.Paths.Home); err != nil {
+			add("artifacts", false, err.Error())
+		} else {
+			add("artifacts", true, fmt.Sprintf("%d files, %s", n, humanBytes(size)))
+		}
+		if free, err := freeBytes(a.Paths.Home); err == nil {
+			add("disk", free > 512<<20, humanBytes(free)+" free")
+		}
 		st.Close()
 	}
 
@@ -111,6 +127,45 @@ func (a *App) cmdDoctor(args []string) (int, error) {
 	return ExitOK, nil
 }
 
+// artifactUsage totals the artifact directory.
+func artifactUsage(home string) (int64, int, error) {
+	root := home + "/artifacts"
+	var total int64
+	n := 0
+	err := filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		total += info.Size()
+		n++
+		return nil
+	})
+	return total, n, err
+}
+
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
 func envOr(v, fallback string) string {
 	if v != "" {
 		return v
@@ -147,4 +202,13 @@ func chromeAvailable() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("chrome not found")
+}
+
+// freeBytes reports the space available on the filesystem holding path.
+func freeBytes(path string) (int64, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return 0, err
+	}
+	return int64(st.Bavail) * int64(st.Bsize), nil
 }

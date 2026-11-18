@@ -35,6 +35,18 @@ QQ official bot ───┘                                  ├── job work
 - **Read-only config.** `config.toml` is `0444` and only changes through
   `pig config`; secrets live in `auth.env` (`0600`) via `pig auth`.
 
+## Operations
+
+```bash
+./pig doctor              # config, providers, db quick_check, artifacts, disk, daemon
+./pig doctor --strict     # non-zero when a check fails
+docker build -t pig .     # reproducible image, non-root, HEALTHCHECK on `pig daemon status`
+```
+
+CI runs `gofmt`, `go vet`, `go test -race` and the e2e script on every push.
+Deleting a session also deletes its artifacts (rows and blob files), so disk does
+not grow with abandoned chats.
+
 ## Quick start
 
 ```bash

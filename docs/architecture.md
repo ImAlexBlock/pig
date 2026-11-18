@@ -404,6 +404,13 @@ Commands: `/new`, `/sessions [n]`, `/resume <id>`, `/stop`, `/status`,
 creates a session in the channel workdir and keeps the model the chat selected;
 `/sessions` lists recent sessions and marks the one bound to this chat.
 
+Only private chats are served. A group or channel message is answered with
+`dm_only` and dropped before session lookup, because one paired group would hand
+the owner's shell and files to every member. Pairing codes stay mandatory.
+Sessions record the chat that created them (`origin_channel`, `origin_chat`), so
+`/sessions` lists only that chat's sessions and `/resume` refuses a session owned
+by another chat. Sessions created from the CLI have no origin and stay reachable.
+
 Replies are localized: `internal/i18n` holds one catalog per language, every key
 exists in all catalogs, and a test fails if a translation drops a formatting
 verb. The chat language is `channel_state.lang` (set by `/lang`), falling back to
