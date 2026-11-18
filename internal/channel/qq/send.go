@@ -105,13 +105,20 @@ func (a *Adapter) Send(ctx context.Context, o channel.Outbound) (channel.Handle,
 			}
 			payload["msg_seq"] = seq
 			payload["msg_id"] = o.ReplyTo
-			if !o.Markdown {
+			// The quote header is opt-in: answers read better without it.
+			if o.Quote && !o.Markdown {
 				payload["message_reference"] = map[string]any{"message_id": o.ReplyTo}
 			}
 		} else {
 			payload["msg_seq"] = a.randomSeq()
 		}
 		res, err := a.post(ctx, path, payload)
+		if err != nil && o.ReplyTo != "" && !o.Quote && !o.Markdown {
+			// Some deployments require the reference on a passive reply. Retry
+			// with it once rather than losing the answer.
+			payload["message_reference"] = map[string]any{"message_id": o.ReplyTo}
+			res, err = a.post(ctx, path, payload)
+		}
 		if err != nil {
 			return h, err
 		}
@@ -162,7 +169,7 @@ func truncate(b []byte, n int) string {
 // (msg_type 7). Each upload returns file_info, which the follow-up message
 // references; both stay inside the passive reply window of replyTo.
 func (a *Adapter) SendMedia(ctx context.Context, chatID string, files []channel.File, replyTo string) error {
-	path, isGroup := a.endpoint(chatID)
+	path, _ := a.endpoint(chatID)
 	if path == "" {
 		return fmt.Errorf("qq: unsupported chat %q", chatID)
 	}
@@ -195,9 +202,6 @@ func (a *Adapter) SendMedia(ctx context.Context, chatID string, files []channel.
 		}
 		msg["msg_id"] = replyTo
 		msg["msg_seq"] = seq
-		if !isGroup {
-			msg["message_reference"] = map[string]any{"message_id": replyTo}
-		}
 		if _, err := a.post(ctx, path, msg); err != nil {
 			return err
 		}

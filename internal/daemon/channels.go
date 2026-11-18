@@ -194,7 +194,8 @@ func (p *chatProgress) flush(ctx context.Context) error {
 		}
 	}
 
-	o := channel.Outbound{ChatID: p.chatID, Text: text, ReplyTo: p.replyTo}
+	// Status lines quote the inbound message; answers deliberately do not.
+	o := channel.Outbound{ChatID: p.chatID, Text: text, ReplyTo: p.replyTo, Quote: true}
 	if handle.ID == "" || !editable {
 		h, err := p.adapter.Send(ctx, o)
 		p.mu.Lock()

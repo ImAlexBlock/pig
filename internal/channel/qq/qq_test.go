@@ -320,3 +320,42 @@ func TestUpdateNeverSendsInTextMode(t *testing.T) {
 		t.Fatalf("Update posted %d message request(s) in text mode", sends)
 	}
 }
+
+// The quote header is opt-in: a passive reply keeps msg_id (required) but only
+// carries message_reference when the caller asks for a quote.
+func TestSendQuoteIsOptIn(t *testing.T) {
+	send := func(quote bool) map[string]any {
+		var body map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/app/getAppAccessToken" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 7200})
+				return
+			}
+			raw, _ := io.ReadAll(r.Body)
+			body = map[string]any{}
+			_ = json.Unmarshal(raw, &body)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "msg-1"})
+		}))
+		defer srv.Close()
+		ad := New(config.QQChannel{AppID: "app", APIBase: srv.URL}, "secret")
+		if _, err := ad.Send(context.Background(), channel.Outbound{
+			ChatID: "u:openid-1", Text: "hi", ReplyTo: "src", Quote: quote,
+		}); err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+		return body
+	}
+
+	plain := send(false)
+	if plain["msg_id"] != "src" {
+		t.Fatalf("passive reply lost msg_id: %v", plain)
+	}
+	if _, ok := plain["message_reference"]; ok {
+		t.Fatalf("answer quoted the user: %v", plain)
+	}
+	quoted := send(true)
+	ref, ok := quoted["message_reference"].(map[string]any)
+	if !ok || ref["message_id"] != "src" {
+		t.Fatalf("quote missing: %v", quoted)
+	}
+}

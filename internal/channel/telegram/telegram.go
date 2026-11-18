@@ -150,7 +150,7 @@ func (a *Adapter) Send(ctx context.Context, o channel.Outbound) (channel.Handle,
 			payload["text"] = channel.TelegramHTML(chunk)
 			payload["parse_mode"] = "HTML"
 		}
-		if o.ReplyTo != "" && i == 0 {
+		if o.Quote && o.ReplyTo != "" && i == 0 {
 			if id, err := strconv.ParseInt(o.ReplyTo, 10, 64); err == nil {
 				payload["reply_to_message_id"] = id
 			}

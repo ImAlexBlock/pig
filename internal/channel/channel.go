@@ -25,9 +25,12 @@ type Inbound struct {
 
 // Outbound is one message to send.
 type Outbound struct {
-	ChatID   string
-	Text     string
-	ReplyTo  string
+	ChatID  string
+	Text    string
+	ReplyTo string
+	// Quote asks the platform to show ReplyTo as a quoted message. Passive
+	// replies stay passive without it: msg_id alone already threads the reply.
+	Quote    bool
 	Markdown bool
 }
 
