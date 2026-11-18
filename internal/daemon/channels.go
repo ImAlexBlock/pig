@@ -168,6 +168,14 @@ func (p *chatProgress) flush(ctx context.Context) error {
 	if sent && recent < p.interval() {
 		return nil
 	}
+	// Channels that charge a reply slot for edits (QQ streaming) must keep
+	// room for the answer: consuming the last slots on status lines means the
+	// final answer has nowhere to go.
+	if sr, ok := p.adapter.(channel.SlotReporter); ok {
+		if sr.RemainingSlots(p.chatID, p.replyTo) < 2 {
+			return nil
+		}
+	}
 	if !editable {
 		// Without message editing every status costs a passive reply: wait for
 		// real work, then post at most one line a minute and never more than
@@ -396,6 +404,12 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, i
 		state = &store.ChannelState{Channel: ad.Name(), ChatID: ib.ChatID}
 	}
 	lang := s.langOf(state)
+	if isGroupChat(ib) {
+		// The bot is a personal assistant: group members would otherwise share
+		// the owner's shell and files through one paired chat.
+		s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyDMOnly), ib.MessageID)
+		return
+	}
 	if !state.Paired {
 		if code, ok := channel.PairCommand(ib.Text); ok {
 			p := s.pairings[ad.Name()]
@@ -447,6 +461,20 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, i
 	s.channelRun(ctx, ad, ib, sess, lang, started)
 }
 
+// isGroupChat reports whether an inbound message came from a group or channel.
+// Pig is a personal assistant: one paired chat must not expose the owner's
+// shell and files to every member of a group.
+func isGroupChat(ib channel.Inbound) bool {
+	if ib.IsGroup {
+		return true
+	}
+	// QQ group/channel ids are namespaced; Telegram group ids are negative.
+	if strings.HasPrefix(ib.ChatID, "g:") || strings.HasPrefix(ib.ChatID, "c:") {
+		return true
+	}
+	return strings.HasPrefix(ib.ChatID, "-")
+}
+
 func (s *Server) sessionForChat(channelName, chatID string) (*store.Session, error) {
 	workdir := s.cfg.Channel.Workdir
 	if workdir == "" {
@@ -455,7 +483,12 @@ func (s *Server) sessionForChat(channelName, chatID string) (*store.Session, err
 	if err := os.MkdirAll(workdir, 0o700); err != nil {
 		return nil, fmt.Errorf("channel: workdir: %v", err)
 	}
-	sess, err := s.createSession(workdir)
+	sess, err := s.st.CreateSession(store.SessionOptions{
+		CWD:           workdir,
+		Model:         s.defaultModel(),
+		OriginChannel: channelName,
+		OriginChat:    chatID,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -546,7 +579,7 @@ func (s *Server) channelCommand(ctx context.Context, ad channel.Adapter, ib chan
 		if n, err := strconv.Atoi(rest); err == nil && n > 0 && n <= 50 {
 			limit = n
 		}
-		sessions, err := s.st.ListSessions(limit)
+		sessions, err := s.st.ListSessionsFor(ad.Name(), ib.ChatID, limit)
 		if err != nil {
 			s.sendText(ctx, ad, ib.ChatID, errText(lang, err), ib.MessageID)
 			return
@@ -575,7 +608,14 @@ func (s *Server) channelCommand(ctx context.Context, ad channel.Adapter, ib chan
 			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeyResumeUsage), ib.MessageID)
 			return
 		}
-		if _, err := s.st.GetSession(rest); err != nil {
+		sess, err := s.st.GetSession(rest)
+		if err != nil {
+			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeySessionNotFound, rest), ib.MessageID)
+			return
+		}
+		// A session belongs to the chat that created it. Sessions created from
+		// the CLI have no origin and stay reachable.
+		if sess.OriginChannel != "" && (sess.OriginChannel != ad.Name() || sess.OriginChat != ib.ChatID) {
 			s.sendText(ctx, ad, ib.ChatID, i18n.T(lang, i18n.KeySessionNotFound, rest), ib.MessageID)
 			return
 		}

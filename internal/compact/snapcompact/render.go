@@ -21,6 +21,10 @@ const (
 type Options struct {
 	FrameWidth     int
 	MaxFrameHeight int
+	// MaxFrames caps how many frames are rendered. Rendering keeps the newest
+	// frames (the tail of the text), matching the selection callers perform
+	// afterwards. Zero or negative means no cap.
+	MaxFrames int
 }
 
 // Frame is one rendered PNG page.
@@ -94,8 +98,17 @@ func Render(text string, opt Options) ([]Frame, error) {
 	if rowsPerFrame < 1 {
 		rowsPerFrame = 1
 	}
+	start := 0
+	if opt.MaxFrames > 0 {
+		total := (len(lines) + rowsPerFrame - 1) / rowsPerFrame
+		if total > opt.MaxFrames {
+			// Only the newest frames are ever selected, so skip the older
+			// chunks entirely instead of encoding them.
+			start = (total - opt.MaxFrames) * rowsPerFrame
+		}
+	}
 	var frames []Frame
-	for start := 0; start < len(lines); start += rowsPerFrame {
+	for ; start < len(lines); start += rowsPerFrame {
 		end := start + rowsPerFrame
 		if end > len(lines) {
 			end = len(lines)

@@ -97,3 +97,51 @@ func TestNormalizeStripsANSI(t *testing.T) {
 		t.Fatalf("tab was not expanded: %q", got)
 	}
 }
+
+func TestRenderMaxFramesKeepsNewest(t *testing.T) {
+	var sb strings.Builder
+	for range 500 {
+		sb.WriteString("line of ascii text 0123456789\n")
+	}
+	text := sb.String()
+	base := Options{FrameWidth: 1568, MaxFrameHeight: 2048}
+
+	full, err := Render(text, base)
+	if err != nil {
+		t.Fatalf("Render full: %v", err)
+	}
+	if len(full) < 3 {
+		t.Fatalf("want at least 3 uncapped frames, got %d", len(full))
+	}
+
+	capped, err := Render(text, Options{FrameWidth: base.FrameWidth, MaxFrameHeight: base.MaxFrameHeight, MaxFrames: 2})
+	if err != nil {
+		t.Fatalf("Render capped: %v", err)
+	}
+	if len(capped) != 2 {
+		t.Fatalf("capped frames = %d, want 2", len(capped))
+	}
+	for i := range capped {
+		want := full[len(full)-2+i]
+		if !bytes.Equal(capped[i].PNG, want.PNG) {
+			t.Fatalf("frame %d PNG differs from uncapped render", i)
+		}
+		if capped[i].Height != want.Height || capped[i].Rows != want.Rows {
+			t.Fatalf("frame %d geometry = %dx%d rows=%d, want %dx%d rows=%d",
+				i, capped[i].Width, capped[i].Height, capped[i].Rows, want.Width, want.Height, want.Rows)
+		}
+	}
+
+	uncapped, err := Render(text, Options{FrameWidth: base.FrameWidth, MaxFrameHeight: base.MaxFrameHeight, MaxFrames: len(full)})
+	if err != nil {
+		t.Fatalf("Render at cap: %v", err)
+	}
+	if len(uncapped) != len(full) {
+		t.Fatalf("cap at frame count changed frames: %d != %d", len(uncapped), len(full))
+	}
+	for i := range uncapped {
+		if !bytes.Equal(uncapped[i].PNG, full[i].PNG) {
+			t.Fatalf("frame %d differs when the cap equals the frame count", i)
+		}
+	}
+}

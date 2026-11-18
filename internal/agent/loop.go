@@ -84,6 +84,18 @@ type runState struct {
 	callSigs    []string
 	stopReason  string
 	softWarned  bool
+
+	// Incremental projection cache. msgs holds the projected entries up to the
+	// last closed tool exchange; pending holds the entries that may still pair
+	// with future ones and is re-projected each turn. projectedSeq is the
+	// highest entry seq already fetched, and cmpID/cmpKeepSeq identify the
+	// compaction whose prefix is baked into msgs.
+	projected    bool
+	msgs         []provider.Message
+	pending      []*store.Entry
+	projectedSeq int
+	cmpID        string
+	cmpKeepSeq   int
 }
 
 func (a *Agent) emit(ev Event) {
@@ -180,6 +192,141 @@ func (a *Agent) toolSpecs(names []string) []provider.ToolSpec {
 }
 
 // rebuildReadSet replays read/write/edit calls to restore the read tracking.
+
+// projectedMessages returns the wire messages for the session prefix.
+//
+// The first turn (or a turn after compaction changed) projects the whole
+// window. Later turns reuse the cached messages and project only the entries
+// appended since, so the work per turn is proportional to the new entries
+// rather than the whole session.
+//
+// compact.Project repairs dangling tool blocks against the entries it is
+// given, and a tool_use can pair with a tool_result that arrives in a later
+// batch. So the cache only holds entries up to the last *closed* tool
+// exchange; the entries after it (in practice one tool batch) stay in
+// st.pending and are re-projected every turn until their exchanges close.
+// Because the cached prefix contains no unpaired tool block, the repair inside
+// Project is a no-op there and the merged result is byte-identical to a full
+// compact.Project over the whole window.
+func (a *Agent) projectedMessages(st *runState, sessionID string, opt compact.ProjectOptions) ([]provider.Message, error) {
+	cmp, _ := a.Store.LatestCompaction(sessionID)
+	cmpID, keepSeq := "", 0
+	if cmp != nil {
+		cmpID, keepSeq = cmp.ID, cmp.FirstKeptSeq
+	}
+	if !st.projected || cmpID != st.cmpID || keepSeq != st.cmpKeepSeq {
+		entries, err := a.Store.AllEntries(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		window := make([]*store.Entry, 0, len(entries))
+		for _, e := range entries {
+			if e.Seq >= keepSeq {
+				window = append(window, e)
+			}
+		}
+		cut := projectCut(window)
+		st.msgs = compact.Project(cmp, window[:cut], opt)
+		st.pending = append(st.pending[:0], window[cut:]...)
+		st.cmpID, st.cmpKeepSeq = cmpID, keepSeq
+		st.projected = true
+		// Skip the dropped prefix on later turns: EntriesAfter only needs to
+		// resume after the newest seq already seen.
+		st.projectedSeq = 0
+		if n := len(entries); n > 0 {
+			st.projectedSeq = entries[n-1].Seq
+		}
+		return st.projectedView(opt), nil
+	}
+	fresh, err := a.Store.EntriesAfter(sessionID, st.projectedSeq, 0)
+	if err != nil {
+		return nil, err
+	}
+	if n := len(fresh); n > 0 {
+		st.projectedSeq = fresh[n-1].Seq
+		// Full projection drops entries below the compaction window and
+		// renders compaction entries as nothing; mirror that before folding.
+		for _, e := range fresh {
+			if e.Seq >= keepSeq {
+				st.pending = append(st.pending, e)
+			}
+		}
+	}
+	if len(st.pending) == 0 {
+		return st.msgs, nil
+	}
+	// Fold the suffix once it closes so it is not re-projected forever.
+	if cut := projectCut(st.pending); cut > 0 {
+		st.msgs = append(st.msgs, compact.Project(nil, st.pending[:cut], opt)...)
+		st.msgs = provider.MergeMessages(st.msgs)
+		st.pending = st.pending[cut:]
+	}
+	return st.projectedView(opt), nil
+}
+
+// projectedView merges the cached prefix with the re-projected open suffix
+// without mutating either.
+func (st *runState) projectedView(opt compact.ProjectOptions) []provider.Message {
+	if len(st.pending) == 0 {
+		return st.msgs
+	}
+	tail := compact.Project(nil, st.pending, opt)
+	out := make([]provider.Message, 0, len(st.msgs)+len(tail))
+	out = append(out, st.msgs...)
+	out = append(out, tail...)
+	return provider.MergeMessages(out)
+}
+
+// projectCut returns how many leading entries may be folded into the cache.
+// It stops at the start of an open tool exchange and always leaves the newest
+// assistant message in the suffix: a tool call appended later attaches to that
+// message, and a dangling call makes Project clear the message's raw payload,
+// so the message must be re-projected together with the call.
+func projectCut(entries []*store.Entry) int {
+	cut := closedPrefix(entries)
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Kind == store.KindMessage && entries[i].Role == "assistant" {
+			if i < cut {
+				cut = i
+			}
+			break
+		}
+	}
+	return cut
+}
+
+// closedPrefix returns the length of the longest prefix of entries whose tool
+// calls all have their matching tool result inside that prefix. Projecting such
+// a prefix is stable: later entries can only pair with tool blocks in the
+// returned suffix.
+func closedPrefix(entries []*store.Entry) int {
+	callAt := map[string]int{}
+	resultAt := map[string]int{}
+	for i, e := range entries {
+		switch e.Kind {
+		case store.KindToolCall:
+			callAt[e.ToolCall().ID] = i
+		case store.KindToolResult:
+			resultAt[e.ToolResult().CallID] = i
+		}
+	}
+	cut := len(entries)
+	for {
+		changed := false
+		for id, ci := range callAt {
+			if ci >= cut {
+				continue
+			}
+			if ri, ok := resultAt[id]; !ok || ri >= cut {
+				cut = ci
+				changed = true
+			}
+		}
+		if !changed {
+			return cut
+		}
+	}
+}
 
 func (a *Agent) Run(ctx context.Context, sessionID string, opt Options) error {
 	sess, err := a.Store.GetSession(sessionID)
@@ -302,24 +449,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, opt Options) error {
 			return fmt.Errorf("run: model %q is not configured", sess.Model)
 		}
 
-		entries, err := a.Store.AllEntries(sessionID)
-		if err != nil {
-			return err
-		}
-		cmp, _ := a.Store.LatestCompaction(sessionID)
-		startSeq := 0
-		if cmp != nil {
-			startSeq = cmp.FirstKeptSeq
-		}
-		window := make([]*store.Entry, 0, len(entries))
-		for _, e := range entries {
-			if e.Seq >= startSeq {
-				window = append(window, e)
-			}
-		}
-		systemText := st.systemText
-
-		msgs := compact.Project(cmp, window, compact.ProjectOptions{
+		msgs, err := a.projectedMessages(st, sessionID, compact.ProjectOptions{
 			ImageInput: model.SupportsImages(),
 			LoadFrame: func(id string) (string, []byte, bool) {
 				art, err := a.Store.GetArtifact(id)
@@ -333,6 +463,10 @@ func (a *Agent) Run(ctx context.Context, sessionID string, opt Options) error {
 				return art.Mime, data, true
 			},
 		})
+		if err != nil {
+			return err
+		}
+		systemText := st.systemText
 		specs := a.toolSpecs(names)
 		req := provider.Request{
 			System:     []provider.Block{{Type: provider.BlockText, Text: systemText}},

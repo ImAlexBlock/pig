@@ -32,6 +32,7 @@ const (
 	KeyPairingFailed   = "pairing_failed"
 	KeyPaired          = "paired"
 	KeyPairingRequired = "pairing_required"
+	KeyDMOnly          = "dm_only"
 	KeyAppended        = "appended"
 	KeyStoppedAfter    = "stopped_after"
 	KeyNoOutput        = "no_output"
@@ -84,6 +85,7 @@ var en = map[string]string{
 	KeyPairingFailed:   "pairing failed: %s",
 	KeyPaired:          "paired. send a message to start.",
 	KeyPairingRequired: "pairing required: /pair <code>",
+	KeyDMOnly:          "private chats only: this bot does not answer in groups",
 	KeyAppended:        "appended (#%d) · handled after the current step",
 	KeyStoppedAfter:    "⏳ stopped after %s",
 	KeyNoOutput:        "(no output)",
@@ -136,6 +138,7 @@ var zh = map[string]string{
 	KeyPairingFailed:   "配对失败：%s",
 	KeyPaired:          "配对成功。发一条消息即可开始。",
 	KeyPairingRequired: "需要配对：/pair <code>",
+	KeyDMOnly:          "仅支持私聊：本机器人不在群里回复",
 	KeyAppended:        "已追加（第 %d 条）· 当前步骤结束后处理",
 	KeyStoppedAfter:    "⏳ 已停止，耗时 %s",
 	KeyNoOutput:        "（无输出）",
@@ -188,6 +191,7 @@ var zhHant = map[string]string{
 	KeyPairingFailed:   "配對失敗：%s",
 	KeyPaired:          "配對成功。傳送一則訊息即可開始。",
 	KeyPairingRequired: "需要配對：/pair <code>",
+	KeyDMOnly:          "僅支援私聊：本機器人不在群組回覆",
 	KeyAppended:        "已附加（第 %d 筆）· 目前步驟結束後處理",
 	KeyStoppedAfter:    "⏳ 已停止，耗時 %s",
 	KeyNoOutput:        "（無輸出）",

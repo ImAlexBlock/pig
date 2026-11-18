@@ -22,13 +22,6 @@ func (m *Manager) snapcompactCandidate(ctx context.Context, req Request, prepare
 	if strings.TrimSpace(text) == "" {
 		return nil, nil
 	}
-	rendered, err := snapcompact.Render(text, snapcompact.Options{
-		FrameWidth:     m.cfg.Snapcompact.FrameWidth,
-		MaxFrameHeight: m.cfg.Snapcompact.MaxFrameHeight,
-	})
-	if err != nil {
-		return nil, err
-	}
 
 	imageTokens := m.cfg.Snapcompact.ImageTokens
 	if imageTokens <= 0 {
@@ -54,6 +47,16 @@ func (m *Manager) snapcompactCandidate(ctx context.Context, req Request, prepare
 	maxImages := m.cfg.Snapcompact.MaxImagesPerRequest
 	if maxImages > 0 && want > maxImages {
 		want = maxImages
+	}
+	// Render only the frames the budget can keep; the oldest ones would be
+	// discarded by the newest-first selection below.
+	rendered, err := snapcompact.Render(text, snapcompact.Options{
+		FrameWidth:     m.cfg.Snapcompact.FrameWidth,
+		MaxFrameHeight: m.cfg.Snapcompact.MaxFrameHeight,
+		MaxFrames:      want,
+	})
+	if err != nil {
+		return nil, err
 	}
 	// Keep the newest frames when the budget is tight.
 	if want > len(rendered) {

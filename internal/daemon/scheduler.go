@@ -65,6 +65,26 @@ func (s *Server) schedulerTick(ctx context.Context) {
 		if !ok {
 			continue
 		}
+		// Decide on time before touching entries: most sessions are alive and
+		// not due, and projecting their transcripts every second is wasted.
+		last := sess.UpdatedAt
+		s.mu.Lock()
+		if t, ok := s.lastRequest[sess.ID]; ok {
+			last = t.Unix()
+		}
+		s.mu.Unlock()
+
+		target := time.Unix(last, 0).Add(time.Duration(s.cfg.Compaction.IdleTimeoutSeconds) * time.Second)
+		if usage, err := s.st.LastUsage(sess.ID); err == nil && usage.CacheRead+usage.CacheWrite > 0 {
+			ttl := model.Cache.TTLSeconds
+			if ttl > 60 {
+				target = time.Unix(last, 0).Add(time.Duration(ttl-60) * time.Second)
+			}
+		}
+		if now.Before(target) {
+			continue
+		}
+
 		entries, err := s.st.AllEntries(sess.ID)
 		if err != nil {
 			continue
@@ -83,23 +103,6 @@ func (s *Server) schedulerTick(ctx context.Context) {
 		msgs := compact.Project(cmp, window, compact.ProjectOptions{ImageInput: model.SupportsImages()})
 		tokens := compact.ProjectTokens(msgs, s.cfg.Snapcompact.ImageTokens)
 		if tokens < int(s.cfg.Compaction.IdleThreshold*float64(model.ContextWindow)) {
-			continue
-		}
-		last := sess.UpdatedAt
-		s.mu.Lock()
-		if t, ok := s.lastRequest[sess.ID]; ok {
-			last = t.Unix()
-		}
-		s.mu.Unlock()
-
-		target := time.Unix(last, 0).Add(time.Duration(s.cfg.Compaction.IdleTimeoutSeconds) * time.Second)
-		if usage, err := s.st.LastUsage(sess.ID); err == nil && usage.CacheRead+usage.CacheWrite > 0 {
-			ttl := model.Cache.TTLSeconds
-			if ttl > 60 {
-				target = time.Unix(last, 0).Add(time.Duration(ttl-60) * time.Second)
-			}
-		}
-		if now.Before(target) {
 			continue
 		}
 		if _, err := s.comp.Compact(ctx, compact.Request{
