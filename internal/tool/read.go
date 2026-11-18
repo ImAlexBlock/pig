@@ -85,16 +85,31 @@ func (readTool) Run(ctx context.Context, c Call, env *Env) (Result, error) {
 	if sel == "" && doc.Text != "" {
 		return Result{Text: fmt.Sprintf("read: no lines at offset %d", start), Display: base}, nil
 	}
+	// partial records that the model did not see the whole file. Marking it as
+	// read in that state lets a later write silently drop the unseen tail.
+	partial := false
 	if limitLines := a.Limit; limitLines > 0 {
 		if lines := strings.Split(sel, "\n"); len(lines) > limitLines {
 			sel = strings.Join(lines[:limitLines], "\n")
+			partial = true
 		}
 	}
 	if len(sel) > 51200 {
 		sel = sel[:51200]
+		partial = true
 	}
-	if base != "" {
+	total := strings.Count(doc.Text, "\n") + 1
+	if doc.Text == "" {
+		total = 0
+	}
+	if start > 1 || (end > 0 && end < total) {
+		partial = true
+	}
+	if base != "" && !partial {
 		env.ReadFiles.Mark(base)
+	}
+	if partial {
+		sel += fmt.Sprintf("\n[truncated: read returned part of this file; request the rest with :N-M before rewriting it]")
 	}
 	return Result{Text: internalurl.RenderLinePrefixed(sel, first, doc.Raw), Display: base}, nil
 }

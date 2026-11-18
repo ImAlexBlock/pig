@@ -346,3 +346,56 @@ func TestSendTool(t *testing.T) {
 		t.Fatal("directory accepted")
 	}
 }
+
+// send must refuse the same protected files write and edit refuse.
+func TestSendProtectsSecrets(t *testing.T) {
+	env, dir := testEnv(t)
+	auth := filepath.Join(dir, "auth.env")
+	if err := os.WriteFile(auth, []byte("LYNSHEN_API_KEY=sk-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := call(t, sendTool{}, map[string]any{"path": auth}, env)
+	if !res.IsError {
+		t.Fatalf("auth.env was sent: %+v", res)
+	}
+	if len(res.Files) != 0 {
+		t.Fatal("secret bytes left the tool")
+	}
+	if !strings.Contains(res.Text, "pig auth") {
+		t.Fatalf("unhelpful refusal: %q", res.Text)
+	}
+}
+
+// A truncated read must say so and must not mark the file as read.
+func TestReadTruncationIsMarkedAndUnread(t *testing.T) {
+	env, dir := testEnv(t)
+	path := filepath.Join(dir, "big.txt")
+	var sb strings.Builder
+	for i := 0; sb.Len() < 60000; i++ {
+		fmt.Fprintf(&sb, "line %06d padding padding padding padding\n", i)
+	}
+	if err := os.WriteFile(path, []byte(sb.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := call(t, readTool{}, map[string]any{"path": path}, env)
+	if res.IsError {
+		t.Fatalf("read: %s", res.Text)
+	}
+	if !strings.Contains(res.Text, "truncated") {
+		t.Fatal("silent truncation")
+	}
+	if env.ReadFiles.Has(path) {
+		t.Fatal("partial read marked the file as read")
+	}
+	// A full read of a small file still counts as read.
+	small := filepath.Join(dir, "small.txt")
+	if err := os.WriteFile(small, []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := call(t, readTool{}, map[string]any{"path": small}, env); r.IsError {
+		t.Fatalf("read small: %s", r.Text)
+	}
+	if !env.ReadFiles.Has(small) {
+		t.Fatal("complete read was not recorded")
+	}
+}

@@ -15,8 +15,11 @@ var rulesTOML string
 
 // Rule is one command match rule.
 type Rule struct {
-	ID      string `toml:"id"`
-	Match   string `toml:"match"`
+	ID    string `toml:"id"`
+	Match string `toml:"match"`
+	// Bare is the exact command the rewrite replaces. A command carrying
+	// arguments is never rewritten: dropping them changes the question.
+	Bare    string `toml:"bare"`
 	Rewrite string `toml:"rewrite"`
 	Filter  string `toml:"filter"`
 
@@ -68,14 +71,19 @@ func MatchRule(command string) (Rule, bool) {
 	return Rule{}, false
 }
 
-// Rewrite applies the rule rewrite when the command is simple (no pipes,
-// redirects or command substitution).
+// Rewrite replaces a bare command with its compact form. A command that carries
+// arguments is left alone: rewriting it would silently drop what the caller
+// asked for ("git status README.md" must not become a whole-tree status).
 func Rewrite(command string) (string, bool) {
 	r, ok := MatchRule(command)
 	if !ok || r.Rewrite == "" {
 		return command, false
 	}
-	if !simpleCommand.MatchString(strings.TrimSpace(command)) {
+	trimmed := strings.TrimSpace(command)
+	if r.Bare == "" || trimmed != r.Bare {
+		return command, false
+	}
+	if !simpleCommand.MatchString(trimmed) {
 		return command, false
 	}
 	return r.Rewrite, true

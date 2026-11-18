@@ -51,6 +51,11 @@ func (sendTool) Run(ctx context.Context, c Call, env *Env) (Result, error) {
 		abs = filepath.Join(env.CWD, abs)
 	}
 	abs = filepath.Clean(abs)
+	// send bypassed the guard write/edit enforce; without it a prompt-injected
+	// "send ~/.pig/auth.env" exfiltrates every provider key to the chat.
+	if msg, ok := protectedPath(env, abs); ok {
+		return Error(msg), nil
+	}
 	info, err := os.Stat(abs)
 	if err != nil || info.IsDir() {
 		return Error("send: file not found: " + a.Path), nil

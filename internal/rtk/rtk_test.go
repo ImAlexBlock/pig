@@ -74,3 +74,17 @@ func TestProgressLines(t *testing.T) {
 		t.Fatalf("progress line lost: %q", out)
 	}
 }
+
+// A command that carries arguments keeps them: rewriting it would answer a
+// different question than the one asked.
+func TestRewriteKeepsArguments(t *testing.T) {
+	for _, cmd := range []string{"git status README.md", "git status --porcelain=v2", "git status -s"} {
+		got, ok := Rewrite(cmd)
+		if ok || got != cmd {
+			t.Errorf("%q was rewritten to %q", cmd, got)
+		}
+	}
+	if got, ok := Rewrite("git status"); !ok || got != "git status --porcelain=v1 --branch" {
+		t.Errorf("bare git status not rewritten: %q %v", got, ok)
+	}
+}

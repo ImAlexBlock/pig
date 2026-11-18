@@ -1,6 +1,7 @@
 [[rule]]
 id = "git-status"
 match = "^git\\s+status(\\s|$)"
+bare = "git status"
 rewrite = "git status --porcelain=v1 --branch"
 filter = "git-status"
 
