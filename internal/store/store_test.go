@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -265,5 +266,102 @@ func TestMigrateV1ToV2(t *testing.T) {
 	again, err := up.GetChannelState("qq", "u:1")
 	if err != nil || again.Lang != "zh-Hant" {
 		t.Fatalf("lang = %q, %v", again.Lang, err)
+	}
+}
+
+// A version 2 database gains the session ownership columns, and a retried
+// upgrade is harmless.
+func TestMigrateV2ToV3Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pig.db")
+	st, err := Open(path, dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	for _, col := range []string{"origin_channel", "origin_chat"} {
+		if _, err := st.DB().Exec(`ALTER TABLE sessions DROP COLUMN ` + col); err != nil {
+			t.Fatalf("drop %s: %v", col, err)
+		}
+	}
+	if _, err := st.DB().Exec(`UPDATE schema_meta SET version=2`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`INSERT INTO sessions(id,parent_id,forked_from_seq,depth,title,cwd,model,created_at,updated_at,archived)
+		VALUES ('ses_old','',0,0,'','/tmp','mock/mock',1,2,0)`); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	for i := 0; i < 2; i++ {
+		up, err := Open(path, dir)
+		if err != nil {
+			t.Fatalf("reopen %d: %v", i, err)
+		}
+		var v int
+		if err := up.DB().QueryRow(`SELECT version FROM schema_meta`).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		if v != SchemaVersion {
+			t.Fatalf("version = %d, want %d", v, SchemaVersion)
+		}
+		sess, err := up.GetSession("ses_old")
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if sess.OriginChannel != "" || sess.OriginChat != "" {
+			t.Fatalf("origin = %q/%q", sess.OriginChannel, sess.OriginChat)
+		}
+		// A second open must not attempt the ALTER again.
+		if i == 0 {
+			up.Close()
+		} else {
+			defer up.Close()
+		}
+	}
+}
+
+// Deleting a session removes its artifacts, rows and blob files.
+func TestDeleteSessionRemovesArtifacts(t *testing.T) {
+	st := openTest(t)
+	sess, err := st.CreateSession(SessionOptions{CWD: "/tmp", Model: "mock/mock", OriginChannel: "qq", OriginChat: "u:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, err := st.PutArtifact(sess.ID, "image/png", []byte("PNG"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteSession(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetArtifact(art.ID); err == nil {
+		t.Fatal("artifact row survived")
+	}
+	if _, err := os.Stat(art.Path); !os.IsNotExist(err) {
+		t.Fatalf("artifact file survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(st.Dir(), "artifacts", sess.ID)); !os.IsNotExist(err) {
+		t.Fatalf("artifact dir survived: %v", err)
+	}
+}
+
+// Sessions are listed and scoped by the chat that created them.
+func TestListSessionsFor(t *testing.T) {
+	st := openTest(t)
+	if _, err := st.CreateSession(SessionOptions{CWD: "/tmp", Model: "mock/mock", OriginChannel: "qq", OriginChat: "u:1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateSession(SessionOptions{CWD: "/tmp", Model: "mock/mock", OriginChannel: "qq", OriginChat: "u:2"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateSession(SessionOptions{CWD: "/tmp", Model: "mock/mock"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.ListSessionsFor("qq", "u:1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].OriginChat != "u:1" {
+		t.Fatalf("sessions = %+v", got)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -16,6 +18,10 @@ type SessionOptions struct {
 	ParentID string
 	Depth    int
 	Title    string
+	// OriginChannel and OriginChat bind the session to the chat that created
+	// it. Empty means the session was created from the CLI/TUI.
+	OriginChannel string
+	OriginChat    string
 }
 
 // CreateSession inserts a new session row.
@@ -27,32 +33,35 @@ func (s *Store) CreateSession(opt SessionOptions) (*Session, error) {
 		return nil, fmt.Errorf("store: session: model is required")
 	}
 	sess := &Session{
-		ID:        NewSessionID(),
-		ParentID:  opt.ParentID,
-		Depth:     opt.Depth,
-		Title:     opt.Title,
-		CWD:       opt.CWD,
-		Model:     opt.Model,
-		CreatedAt: now(),
-		UpdatedAt: now(),
+		ID:            NewSessionID(),
+		ParentID:      opt.ParentID,
+		Depth:         opt.Depth,
+		Title:         opt.Title,
+		CWD:           opt.CWD,
+		Model:         opt.Model,
+		OriginChannel: opt.OriginChannel,
+		OriginChat:    opt.OriginChat,
+		CreatedAt:     now(),
+		UpdatedAt:     now(),
 	}
-	_, err := s.db.Exec(`INSERT INTO sessions(id,parent_id,forked_from_seq,depth,title,cwd,model,created_at,updated_at,archived)
-		VALUES (?,?,?,?,?,?,?,?,?,0)`,
-		sess.ID, sess.ParentID, 0, sess.Depth, sess.Title, sess.CWD, sess.Model, sess.CreatedAt, sess.UpdatedAt)
+	_, err := s.db.Exec(`INSERT INTO sessions(id,parent_id,forked_from_seq,depth,title,cwd,model,origin_channel,origin_chat,created_at,updated_at,archived)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,0)`,
+		sess.ID, sess.ParentID, 0, sess.Depth, sess.Title, sess.CWD, sess.Model,
+		sess.OriginChannel, sess.OriginChat, sess.CreatedAt, sess.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("store: session: %v", err)
 	}
 	return sess, nil
 }
 
-const sessionCols = `id,parent_id,forked_from_seq,depth,title,cwd,model,created_at,updated_at,archived`
+const sessionCols = `id,parent_id,forked_from_seq,depth,title,cwd,model,origin_channel,origin_chat,created_at,updated_at,archived`
 
 func scanSession(sc interface{ Scan(...any) error }) (*Session, error) {
 	var s Session
 	var archived int
 	var parent sql.NullString
 	if err := sc.Scan(&s.ID, &parent, &s.ForkedFromSeq, &s.Depth, &s.Title, &s.CWD, &s.Model,
-		&s.CreatedAt, &s.UpdatedAt, &archived); err != nil {
+		&s.OriginChannel, &s.OriginChat, &s.CreatedAt, &s.UpdatedAt, &archived); err != nil {
 		return nil, err
 	}
 	s.ParentID = parent.String
@@ -107,10 +116,42 @@ func (s *Store) ListSessions(limit int) ([]*Session, error) {
 	return out, rows.Err()
 }
 
+// ListSessionsFor returns sessions owned by one chat, newest first.
+func (s *Store) ListSessionsFor(channel, chatID string, limit int) ([]*Session, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`SELECT `+sessionCols+` FROM sessions
+		WHERE origin_channel=? AND origin_chat=? ORDER BY updated_at DESC, rowid DESC LIMIT ?`,
+		channel, chatID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: sessions: %v", err)
+	}
+	defer rows.Close()
+	var out []*Session
+	for rows.Next() {
+		sess, err := scanSession(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: sessions: %v", err)
+		}
+		out = append(out, sess)
+	}
+	return out, rows.Err()
+}
+
 // TouchSession updates updated_at (and optionally the model).
 func (s *Store) TouchSession(id string) error {
 	_, err := s.db.Exec(`UPDATE sessions SET updated_at=? WHERE id=?`, now(), id)
 	return err
+}
+
+// SetSessionCWD repoints a session at a directory the daemon can enter.
+func (s *Store) SetSessionCWD(id, cwd string) error {
+	_, err := s.db.Exec(`UPDATE sessions SET cwd=? WHERE id=?`, cwd, id)
+	if err != nil {
+		return fmt.Errorf("store: session: %v", err)
+	}
+	return nil
 }
 
 // SetSessionModel changes the model bound to a session.
@@ -131,14 +172,81 @@ func (s *Store) SetSessionTitle(id, title string) error {
 	return err
 }
 
-// DeleteSession removes a session and its entries.
+// DeleteSession removes a session, its entries and its artifacts. Blob files are
+// removed after the rows commit; a file that cannot be unlinked is reported but
+// does not undo the delete.
 func (s *Store) DeleteSession(id string) error {
-	res, err := s.db.Exec(`DELETE FROM sessions WHERE id=?`, id)
+	rows, err := s.db.Query(`SELECT path FROM artifacts WHERE session_id=?`, id)
+	if err != nil {
+		return fmt.Errorf("store: session: %v", err)
+	}
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			rows.Close()
+			return fmt.Errorf("store: session: %v", err)
+		}
+		paths = append(paths, p)
+	}
+	rows.Close()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("store: session: %v", err)
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`DELETE FROM sessions WHERE id=?`, id)
 	if err != nil {
 		return fmt.Errorf("store: session: %v", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("store: session %s: %w", id, ErrNotFound)
+	}
+	if _, err := tx.Exec(`DELETE FROM artifacts WHERE session_id=?`, id); err != nil {
+		return fmt.Errorf("store: session: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: session: %v", err)
+	}
+	for _, p := range paths {
+		_ = os.Remove(p)
+	}
+	_ = os.Remove(filepath.Join(s.dir, "artifacts", id))
+	return nil
+}
+
+// Elision replaces the content of existing entries and records the compaction
+// that caused it in one transaction, so a crash cannot leave half-elided
+// history with no compaction row behind it.
+type Elision struct {
+	EntryID string
+	Content string
+	Tokens  int
+}
+
+// ElideToolResults applies every elision and the compaction row atomically.
+func (s *Store) ElideToolResults(edits []Elision, cmp *Compaction) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("store: elide: %v", err)
+	}
+	defer tx.Rollback()
+	for _, ed := range edits {
+		if _, err := tx.Exec(`UPDATE entries SET content=?, tokens=? WHERE id=?`, ed.Content, ed.Tokens, ed.EntryID); err != nil {
+			return fmt.Errorf("store: elide: %v", err)
+		}
+	}
+	if cmp != nil {
+		if _, err := tx.Exec(`INSERT INTO compactions(id,session_id,entry_id,method,summary,first_kept_seq,source_text,frames,tokens_before,tokens_after,created_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+			cmp.ID, cmp.SessionID, cmp.EntryID, cmp.Method, cmp.Summary, cmp.FirstKeptSeq,
+			cmp.SourceText, cmp.Frames, cmp.TokensBefore, cmp.TokensAfter, now()); err != nil {
+			return fmt.Errorf("store: elide: %v", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: elide: %v", err)
 	}
 	return nil
 }
@@ -358,6 +466,8 @@ func (s *Store) ForkSession(parentID string, seq int) (*Session, error) {
 		Title:         parent.Title,
 		CWD:           parent.CWD,
 		Model:         parent.Model,
+		OriginChannel: parent.OriginChannel,
+		OriginChat:    parent.OriginChat,
 		CreatedAt:     now(),
 		UpdatedAt:     now(),
 	}
@@ -366,10 +476,11 @@ func (s *Store) ForkSession(parentID string, seq int) (*Session, error) {
 		return nil, fmt.Errorf("store: fork: %v", err)
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO sessions(id,parent_id,forked_from_seq,depth,title,cwd,model,created_at,updated_at,archived)
-		VALUES (?,?,?,?,?,?,?,?,?,0)`,
+	// A fork stays owned by the chat that owns the parent.
+	if _, err := tx.Exec(`INSERT INTO sessions(id,parent_id,forked_from_seq,depth,title,cwd,model,origin_channel,origin_chat,created_at,updated_at,archived)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,0)`,
 		child.ID, child.ParentID, child.ForkedFromSeq, child.Depth, child.Title, child.CWD, child.Model,
-		child.CreatedAt, child.UpdatedAt); err != nil {
+		child.OriginChannel, child.OriginChat, child.CreatedAt, child.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("store: fork: %v", err)
 	}
 	rows, err := tx.Query(`SELECT seq,kind,role,content,tokens FROM entries WHERE session_id=? AND seq<=? ORDER BY seq`,

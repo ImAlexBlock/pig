@@ -14,9 +14,9 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-// SchemaVersion is the current store schema version. Version 1 databases are
+// SchemaVersion is the current store schema version. Older databases are
 // upgraded in place on open.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // ErrNotFound reports a missing row.
 var ErrNotFound = errors.New("not found")
@@ -36,6 +36,10 @@ type Session struct {
 	Title         string `json:"title"`
 	CWD           string `json:"cwd"`
 	Model         string `json:"model"`
+	// OriginChannel and OriginChat record which chat created the session, so a
+	// channel can only list and resume its own sessions.
+	OriginChannel string `json:"origin_channel,omitempty"`
+	OriginChat    string `json:"origin_chat,omitempty"`
 	CreatedAt     int64  `json:"created_at"`
 	UpdatedAt     int64  `json:"updated_at"`
 	Archived      bool   `json:"archived"`
@@ -172,17 +176,78 @@ func (s *Store) migrate() error {
 		return nil
 	case err != nil:
 		return fmt.Errorf("store: migration failed at version %d: %v", SchemaVersion, err)
-	case version == 1:
-		// v2 adds channel_state.lang: chat reply language.
-		if _, err := s.db.Exec(`ALTER TABLE channel_state ADD COLUMN lang TEXT NOT NULL DEFAULT ''`); err != nil {
-			return fmt.Errorf("store: migration 1→2: %v", err)
-		}
-		if _, err := s.db.Exec(`UPDATE schema_meta SET version=?`, SchemaVersion); err != nil {
-			return fmt.Errorf("store: migration 1→2: %v", err)
-		}
-		return nil
-	case version != SchemaVersion:
+	case version > SchemaVersion:
 		return fmt.Errorf("store: migration failed at version %d: unsupported schema version %d", SchemaVersion, version)
+	case version == SchemaVersion:
+		return nil
+	}
+
+	// One transaction for the whole upgrade: a crash mid-way must not leave the
+	// file with a new column and an old version number, which would make every
+	// later open fail on the duplicate ALTER.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("store: migration failed at version %d: %v", SchemaVersion, err)
+	}
+	defer tx.Rollback()
+	if version < 2 {
+		if err := addColumnTx(tx, "channel_state", "lang", `TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("store: migration 1→2: %v", err)
+		}
+	}
+	if version < 3 {
+		if err := addColumnTx(tx, "sessions", "origin_channel", `TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("store: migration 2→3: %v", err)
+		}
+		if err := addColumnTx(tx, "sessions", "origin_chat", `TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("store: migration 2→3: %v", err)
+		}
+		// Backfill ownership from the chat bindings that already exist, so a
+		// chat keeps seeing the session it was using before the upgrade.
+		if _, err := tx.Exec(`UPDATE sessions SET
+			origin_channel = COALESCE((SELECT cs.channel FROM channel_state cs WHERE cs.session_id = sessions.id LIMIT 1), ''),
+			origin_chat    = COALESCE((SELECT cs.chat_id FROM channel_state cs WHERE cs.session_id = sessions.id LIMIT 1), '')
+			WHERE origin_channel = '' AND origin_chat = ''
+			  AND EXISTS (SELECT 1 FROM channel_state cs WHERE cs.session_id = sessions.id)`); err != nil {
+			return fmt.Errorf("store: migration 2→3: %v", err)
+		}
+	}
+	if _, err := tx.Exec(`UPDATE schema_meta SET version=?`, SchemaVersion); err != nil {
+		return fmt.Errorf("store: migration failed at version %d: %v", SchemaVersion, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: migration failed at version %d: %v", SchemaVersion, err)
+	}
+	return nil
+}
+
+// addColumnTx adds a column unless it already exists, so a retried migration is
+// harmless.
+func addColumnTx(tx *sql.Tx, table, column, decl string) error {
+	rows, err := tx.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return fmt.Errorf("pragma_table_info %s: %v", table, err)
+	}
+	found := false
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return fmt.Errorf("pragma_table_info %s: %v", table, err)
+		}
+		if name == column {
+			found = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("pragma_table_info %s: %v", table, err)
+	}
+	if found {
+		return nil
+	}
+	if _, err := tx.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + decl); err != nil {
+		return fmt.Errorf("alter %s: %v", table, err)
 	}
 	return nil
 }
