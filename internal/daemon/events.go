@@ -47,6 +47,7 @@ func (f *fanout) newSubscriber(conn *ipc.Conn) *subscriber {
 
 func (f *fanout) start(s *subscriber) {
 	go func() {
+		defer f.remove(s)
 		for {
 			select {
 			case <-s.done:
@@ -59,6 +60,8 @@ func (f *fanout) start(s *subscriber) {
 					err = s.conn.Send("run.event", map[string]any{"run_id": ev.RunID, "event": ev})
 				}
 				if err != nil {
+					// Leaving the subscriber registered would fill its buffer and
+					// block the emitting run on the next tool event.
 					return
 				}
 			}

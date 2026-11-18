@@ -156,7 +156,57 @@ func Project(cmp *store.Compaction, entries []*store.Entry, opt ProjectOptions) 
 			}}})
 		}
 	}
-	return provider.MergeMessages(msgs)
+	return provider.MergeMessages(DropDanglingToolBlocks(msgs))
+}
+
+// DropDanglingToolBlocks removes tool_use blocks with no matching tool_result and
+// tool_result blocks with no matching tool_use. A crash, a failed persist or a
+// compaction cut can leave either half behind, and both wires reject a request
+// that pairs them wrongly. It is exported so an incremental projection can apply
+// it over the whole cached view.
+func DropDanglingToolBlocks(msgs []provider.Message) []provider.Message {
+	calls := map[string]bool{}
+	results := map[string]bool{}
+	for _, m := range msgs {
+		for _, b := range m.Blocks {
+			switch b.Type {
+			case provider.BlockToolUse:
+				calls[b.ToolID] = true
+			case provider.BlockToolResult:
+				results[b.ToolID] = true
+			}
+		}
+	}
+	out := msgs[:0]
+	for _, m := range msgs {
+		blocks := m.Blocks[:0]
+		dropped := false
+		for _, b := range m.Blocks {
+			switch b.Type {
+			case provider.BlockToolUse:
+				if !results[b.ToolID] {
+					dropped = true
+					continue
+				}
+			case provider.BlockToolResult:
+				if !calls[b.ToolID] {
+					dropped = true
+					continue
+				}
+			}
+			blocks = append(blocks, b)
+		}
+		m.Blocks = blocks
+		if dropped {
+			// A native payload would replay the block we just removed.
+			m.Raw = nil
+		}
+		if len(m.Blocks) == 0 && m.Raw == nil {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // ProjectTokens estimates the token size of projected messages.

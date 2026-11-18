@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"time"
 
 	"github.com/ImAlexBlock/pig/internal/agent"
@@ -53,14 +54,36 @@ func (s *Server) resolveSession(sessionID, cwd string) (*store.Session, error) {
 	if cwd == "" {
 		cwd, _ = userCWD()
 	}
-	return s.createSession(cwd)
+	return s.createSession(s.usableCWD(cwd))
+}
+
+// usableCWD keeps a directory the daemon can actually enter. A host path handed
+// to a containerised daemon does not exist inside the container, and every bash
+// call would fail on chdir.
+func (s *Server) usableCWD(cwd string) string {
+	if cwd != "" {
+		if info, err := os.Stat(cwd); err == nil && info.IsDir() {
+			return cwd
+		}
+	}
+	if workdir := s.paths.Workdir(); workdir != "" {
+		if err := os.MkdirAll(workdir, 0o700); err == nil {
+			return workdir
+		}
+	}
+	return cwd
+}
+
+// defaultModel is the first ref in roles.main, or empty when unset.
+func (s *Server) defaultModel() string {
+	if chain := s.cfg.RoleChain("main"); len(chain) > 0 {
+		return chain[0]
+	}
+	return ""
 }
 
 func (s *Server) createSession(cwd string) (*store.Session, error) {
-	model := ""
-	if chain := s.cfg.RoleChain("main"); len(chain) > 0 {
-		model = chain[0]
-	}
+	model := s.defaultModel()
 	if model == "" {
 		return nil, fmt.Errorf("run: no model configured for roles.main")
 	}
@@ -72,6 +95,13 @@ func (s *Server) StartRun(spec runSpec) (string, string, bool, error) {
 	sess, err := s.resolveSession(spec.SessionID, spec.CWD)
 	if err != nil {
 		return "", "", false, err
+	}
+	if fixed := s.usableCWD(sess.CWD); fixed != sess.CWD {
+		// A containerised daemon cannot enter a host path; repoint the session
+		// instead of failing every bash call.
+		if err := s.st.SetSessionCWD(sess.ID, fixed); err == nil {
+			sess.CWD = fixed
+		}
 	}
 	spec.SessionID = sess.ID
 
@@ -102,6 +132,17 @@ func (s *Server) StartRun(spec runSpec) (string, string, bool, error) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		// A panic anywhere in the run (projection, store, sink) would otherwise
+		// take the whole daemon down with every attached session.
+		defer func() {
+			if r := recover(); r != nil {
+				s.logf("run %s panic: %v\n%s", rec.ID, r, debug.Stack())
+				s.fan.emit(rec.ID, rec.SessionID, agent.Event{
+					Type: agent.EvError, RunID: rec.ID, SessionID: rec.SessionID,
+					Error: fmt.Sprintf("internal error: %v", r),
+				})
+			}
+		}()
 		s.runLoop(rec, spec)
 	}()
 	return rec.ID, sess.ID, false, nil
