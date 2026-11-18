@@ -715,9 +715,10 @@ func (s *Server) channelStatus(sessionID string, lang i18n.Lang) string {
 // channelRun starts a run and mirrors it into the chat.
 // saveInboundAttachments stores chat attachments as artifacts and returns the
 // ids plus a prompt note the model can act on.
-func (s *Server) saveInboundAttachments(sessionID string, attachments []channel.Attachment) ([]string, string) {
+func (s *Server) saveInboundAttachments(sessionID string, attachments []channel.Attachment, vision bool) ([]string, string) {
 	var ids []string
 	var lines []string
+	needsRead := false
 	for _, a := range attachments {
 		if len(a.Data) == 0 {
 			continue
@@ -736,16 +737,27 @@ func (s *Server) saveInboundAttachments(sessionID string, attachments []channel.
 		if name == "" {
 			name = art.ID
 		}
+		if vision && strings.HasPrefix(mime, "image/") {
+			// The image itself travels as an image block; do not tell the model
+			// it can only read a path, it will believe the text over the pixels.
+			lines = append(lines, fmt.Sprintf("[image attached below: %s (%d bytes)]", name, len(a.Data)))
+			continue
+		}
 		lines = append(lines, fmt.Sprintf("[attachment %s %s (%d bytes) artifact://%s]", a.Kind, name, len(a.Data), art.ID))
+		needsRead = true
 	}
-	if len(ids) > 0 {
-		lines = append(lines, "Read an attachment with `read artifact://<id>`; images are shown to you when the model supports them.")
+	if needsRead {
+		lines = append(lines, "Read an attachment with `read artifact://<id>`.")
 	}
 	return ids, strings.Join(lines, "\n")
 }
 
 func (s *Server) channelRun(ctx context.Context, ad channel.Adapter, ib channel.Inbound, sess *store.Session, lang i18n.Lang, started func()) {
-	attachIDs, attachNote := s.saveInboundAttachments(sess.ID, ib.Attachments)
+	vision := false
+	if m, ok := s.cfg.Model(sess.Model); ok {
+		vision = m.SupportsImages()
+	}
+	attachIDs, attachNote := s.saveInboundAttachments(sess.ID, ib.Attachments, vision)
 	prompt := ib.Text
 	if attachNote != "" {
 		prompt = strings.TrimSpace(prompt + "\n\n" + attachNote)

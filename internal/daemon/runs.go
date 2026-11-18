@@ -188,6 +188,12 @@ func (s *Server) runLoop(rec *runRecord, spec runSpec) {
 		}
 	}()
 
+	if sess, err := s.st.GetSession(rec.SessionID); err == nil {
+		if m, ok := s.cfg.Model(sess.Model); ok {
+			s.logf("run %s session %s model %s images=%v attachments=%d",
+				rec.ID, rec.SessionID, sess.Model, m.SupportsImages(), len(spec.Attachments))
+		}
+	}
 	opt := agent.Options{
 		RunID:         rec.ID,
 		Prompt:        spec.Prompt,

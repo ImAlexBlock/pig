@@ -125,3 +125,33 @@ func TestStartRunRepointsMissingCWD(t *testing.T) {
 		t.Fatalf("cwd = %q, want workdir", fixed.CWD)
 	}
 }
+
+// A vision model must not be told that it can only read a path: it believes the
+// text over the image that travels with the request.
+func TestAttachmentNoteForVisionModel(t *testing.T) {
+	srv, _, _ := newLangServer(t, "en")
+	sess, err := srv.Store().CreateSession(storeOptions(t, "fake", "chat-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := []channel.Attachment{{Kind: "image", Name: "p.jpg", Mime: "image/jpeg", Data: []byte("\xff\xd8\xff")}}
+	ids, note := srv.saveInboundAttachments(sess.ID, img, true)
+	if len(ids) != 1 {
+		t.Fatalf("ids = %v", ids)
+	}
+	if !strings.Contains(note, "image attached below") || strings.Contains(note, "artifact://") {
+		t.Fatalf("vision note = %q", note)
+	}
+
+	// A text-only model still gets the artifact reference and the read hint.
+	_, note = srv.saveInboundAttachments(sess.ID, img, false)
+	if !strings.Contains(note, "artifact://") || !strings.Contains(note, "Read an attachment") {
+		t.Fatalf("text note = %q", note)
+	}
+
+	// Non-image files always keep the path, even for a vision model.
+	_, note = srv.saveInboundAttachments(sess.ID, []channel.Attachment{{Kind: "file", Name: "a.zip", Mime: "application/zip", Data: []byte("PK")}}, true)
+	if !strings.Contains(note, "artifact://") {
+		t.Fatalf("file note = %q", note)
+	}
+}

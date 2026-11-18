@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -277,6 +279,32 @@ func (st *runState) projectedView(opt compact.ProjectOptions) []provider.Message
 	return provider.MergeMessages(out)
 }
 
+// debugProjection records what a turn actually sends when PIG_DEBUG_PROJ is set.
+func debugProjection(sessionID string, msgs []provider.Message, cached, pending int, imageInput bool) {
+	if os.Getenv("PIG_DEBUG_PROJ") == "" {
+		return
+	}
+	images := 0
+	for _, m := range msgs {
+		for _, b := range m.Blocks {
+			if b.Type == provider.BlockImage {
+				images++
+			}
+		}
+	}
+	path := filepath.Join(os.Getenv("PIG_HOME"), "logs", "proj.log")
+	if home := os.Getenv("PIG_HOME"); home == "" {
+		path = filepath.Join(os.TempDir(), "pig-proj.log")
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(f, "%s session=%s cached=%d pending=%d message_images=%d image_input=%v\n",
+		time.Now().Format(time.RFC3339), sessionID, cached, pending, images, imageInput)
+	f.Close()
+}
+
 // projectCut returns how many leading entries may be folded into the cache.
 // It stops at the start of an open tool exchange and always leaves the newest
 // assistant message in the suffix: a tool call appended later attaches to that
@@ -466,6 +494,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, opt Options) error {
 		if err != nil {
 			return err
 		}
+		debugProjection(sessionID, msgs, len(st.msgs), len(st.pending), model.SupportsImages())
 		systemText := st.systemText
 		specs := a.toolSpecs(names)
 		req := provider.Request{
