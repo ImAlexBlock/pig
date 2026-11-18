@@ -46,6 +46,8 @@ func (m *Manager) shakeCandidate(prepared Prepared, tokensBefore int) (*candidat
 		if before < ShakeMinEntryTokens {
 			continue
 		}
+		// Without an artifact the original text exists nowhere else, so commit
+		// spills it before eliding. The placeholder here only sizes the saving.
 		placeholder := "[elided]"
 		if r.Artifact != "" {
 			placeholder = fmt.Sprintf("[elided; artifact://%s]", r.Artifact)
@@ -55,7 +57,7 @@ func (m *Manager) shakeCandidate(prepared Prepared, tokensBefore int) (*candidat
 			continue
 		}
 		saved += before - after
-		edits = append(edits, elideEdit{entry: e, text: placeholder})
+		edits = append(edits, elideEdit{entry: e, text: placeholder, spill: r.Artifact == ""})
 	}
 	if len(edits) == 0 || saved < ShakeMinSavings {
 		return nil, nil

@@ -304,3 +304,93 @@ func TestProjectAttachments(t *testing.T) {
 		t.Fatalf("placeholder missing: %q", joined)
 	}
 }
+
+// A tool_use without a tool_result (interrupted batch, crash, compaction cut)
+// and a tool_result without a tool_use are both dropped, because either half
+// alone is rejected by the provider.
+func TestProjectDropsDanglingToolBlocks(t *testing.T) {
+	call := func(id string) *store.Entry {
+		return &store.Entry{Kind: store.KindToolCall, Seq: 1,
+			Content: store.NewToolCallContent(store.ToolCallContent{ID: id, Name: "bash", Args: []byte(`{}`)})}
+	}
+	result := func(id string) *store.Entry {
+		return &store.Entry{Kind: store.KindToolResult, Seq: 2,
+			Content: store.NewToolResultContent(store.ToolResultContent{CallID: id, Name: "bash", Text: "ok"})}
+	}
+	text := func(s string, seq int) *store.Entry {
+		return &store.Entry{Kind: store.KindMessage, Role: "user", Seq: seq,
+			Content: store.NewMessageContent(store.MessageContent{Text: s})}
+	}
+
+	// call c1 has a result, c2 does not; r9 has no call.
+	msgs := Project(nil, []*store.Entry{
+		text("go", 1), call("c1"), result("c1"), call("c2"), result("r9"),
+	}, ProjectOptions{})
+
+	var calls, results []string
+	for _, m := range msgs {
+		for _, b := range m.Blocks {
+			switch b.Type {
+			case provider.BlockToolUse:
+				calls = append(calls, b.ToolID)
+			case provider.BlockToolResult:
+				results = append(results, b.ToolID)
+			}
+		}
+	}
+	if len(calls) != 1 || calls[0] != "c1" {
+		t.Fatalf("tool_use = %v, want [c1]", calls)
+	}
+	if len(results) != 1 || results[0] != "c1" {
+		t.Fatalf("tool_result = %v, want [c1]", results)
+	}
+}
+
+// shake keeps the bytes it elides: when the tool result has no artifact, the
+// original text is spilled first so the placeholder points at something.
+func TestShakeSpillsBeforeEliding(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "pig.db"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	sess, err := st.CreateSession(store.SessionOptions{CWD: dir, Model: "mock/mock"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := strings.Repeat("x", 40000)
+	entry, err := st.AppendEntry(sess.ID, store.KindToolResult, "",
+		store.NewToolResultContent(store.ToolResultContent{CallID: "c1", Name: "bash", Text: big}), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.MockConfig(filepath.Join(dir, "config.toml"))
+	m := NewManager(cfg, st, nil)
+	prepared := Prepared{Summarize: []*store.Entry{entry}}
+	cand, err := m.shakeCandidate(prepared, EstimateTokens(big))
+	if err != nil || cand == nil {
+		t.Fatalf("no candidate: %v", err)
+	}
+	if err := m.commit(sess.ID, EstimateTokens(big), cand); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, err := st.Entry(entry.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := stored.ToolResult()
+	if !strings.Contains(r.Text, "artifact://") {
+		t.Fatalf("elided without artifact: %q", r.Text)
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(r.Text, "[elided; artifact://"), "]")
+	art, data, err := st.ReadArtifact(id)
+	if err != nil {
+		t.Fatalf("artifact: %v", err)
+	}
+	if art.Mime != "text/plain" || string(data) != big {
+		t.Fatalf("artifact mime=%q bytes=%d", art.Mime, len(data))
+	}
+}

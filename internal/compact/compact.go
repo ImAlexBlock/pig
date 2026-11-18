@@ -59,6 +59,9 @@ type Result struct {
 type elideEdit struct {
 	entry *store.Entry
 	text  string
+	// spill marks an edit whose original text has no artifact yet: commit
+	// writes one first so the elision stays reversible.
+	spill bool
 }
 
 type candidate struct {
@@ -194,14 +197,26 @@ func (m *Manager) Compact(ctx context.Context, req Request) (Result, error) {
 
 func (m *Manager) commit(sessionID string, tokensBefore int, c *candidate) error {
 	if c.method == "shake" {
+		edits := make([]store.Elision, 0, len(c.elide))
 		for _, ed := range c.elide {
 			content := ed.entry.ToolResult()
-			content.Text = ed.text
-			if err := m.store.UpdateEntryContent(ed.entry.ID, store.NewToolResultContent(content), EstimateTokens(ed.text)); err != nil {
-				return err
+			text := ed.text
+			if ed.spill && content.Artifact == "" {
+				// Keep the original bytes reachable before overwriting the row.
+				art, err := m.store.PutArtifact(sessionID, "text/plain", []byte(content.Text))
+				if err != nil {
+					return err
+				}
+				text = "[elided; artifact://" + art.ID + "]"
 			}
+			content.Text = text
+			edits = append(edits, store.Elision{
+				EntryID: ed.entry.ID,
+				Content: store.NewToolResultContent(content),
+				Tokens:  EstimateTokens(text),
+			})
 		}
-		return m.store.AppendCompaction(&store.Compaction{
+		return m.store.ElideToolResults(edits, &store.Compaction{
 			SessionID:    sessionID,
 			Method:       "shake",
 			Summary:      "",
